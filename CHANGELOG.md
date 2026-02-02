@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/armgabrielyan/deadbranch/compare/v0.1.0...v0.1.1) (2026-02-02)
+
+
+### Bug Fixes
+
+* fix duplicate remote branches table ([0da13a5](https://github.com/armgabrielyan/deadbranch/commit/0da13a5cc225c7bff086e3183f9a6b093ccbdb49))
+* fix duplicate remote branches table ([10594b1](https://github.com/armgabrielyan/deadbranch/commit/10594b17f41fcbe83370bfbc29f1d8f820678a49)), closes [#2](https://github.com/armgabrielyan/deadbranch/issues/2)
+
 ## [0.1.0](https://github.com/armgabrielyan/deadbranch/tree/v0.1.0) (2026-02-01)
 
 
