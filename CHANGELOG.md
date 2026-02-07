@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.2](https://github.com/armgabrielyan/deadbranch/compare/v0.1.1...v0.1.2) (2026-02-07)
+
+
+### Features
+
+* add backup clean command ([b622c18](https://github.com/armgabrielyan/deadbranch/commit/b622c180c7cda4f60799ede466418a3f4505fff3))
+* add backup list command ([2612277](https://github.com/armgabrielyan/deadbranch/commit/261227740dd8bf755787dc6f3e76c8380439f082))
+* add backup restore command ([c38d474](https://github.com/armgabrielyan/deadbranch/commit/c38d474f0a3b7df67aca7a61641f34f66a90850d))
+* add backup stats command ([fda476b](https://github.com/armgabrielyan/deadbranch/commit/fda476b9e9876cacaa108f914676d366760c9122))
+* add enumeration with # to clean command tables ([fa52255](https://github.com/armgabrielyan/deadbranch/commit/fa52255fc631916182bb4a31407ae099cba026bc))
+* add loader for local branches ([2700029](https://github.com/armgabrielyan/deadbranch/commit/2700029b3010e9caec6ed3efabbe5d7059b55973))
+* allow auto-approve for clean command ([ab67e26](https://github.com/armgabrielyan/deadbranch/commit/ab67e26004d4611ce003dd1e5a758d49dae7c428))
+
 ## [0.1.1](https://github.com/armgabrielyan/deadbranch/compare/v0.1.0...v0.1.1) (2026-02-02)
 
 
