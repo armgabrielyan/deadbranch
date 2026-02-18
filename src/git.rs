@@ -99,7 +99,7 @@ fn list_local_branches(default_branch: &str) -> Result<Vec<Branch>> {
     let output = Command::new("git")
         .args([
             "for-each-ref",
-            "--format=%(refname:short)|%(committerdate:unix)|%(objectname:short)",
+            "--format=%(refname:short)|%(committerdate:unix)|%(objectname:short)|%(authorname)",
             "refs/heads/",
         ])
         .output()
@@ -118,13 +118,14 @@ fn list_local_branches(default_branch: &str) -> Result<Vec<Branch>> {
 
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split('|').collect();
-        if parts.len() != 3 {
+        if parts.len() != 4 {
             continue;
         }
 
         let name = parts[0].to_string();
         let timestamp: i64 = parts[1].parse().unwrap_or(0);
         let sha = parts[2].to_string();
+        let author = parts[3].to_string();
 
         // Skip current branch
         if name == current_branch {
@@ -142,6 +143,7 @@ fn list_local_branches(default_branch: &str) -> Result<Vec<Branch>> {
             is_remote: false,
             last_commit_sha: sha,
             last_commit_date: commit_date,
+            last_commit_user: author,
         });
     }
 
@@ -153,7 +155,7 @@ fn list_remote_branches(default_branch: &str) -> Result<Vec<Branch>> {
     let output = Command::new("git")
         .args([
             "for-each-ref",
-            "--format=%(refname:short)|%(committerdate:unix)|%(objectname:short)",
+            "--format=%(refname:short)|%(committerdate:unix)|%(objectname:short)|%(authorname)",
             "refs/remotes/origin/",
         ])
         .output()
@@ -171,13 +173,14 @@ fn list_remote_branches(default_branch: &str) -> Result<Vec<Branch>> {
 
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split('|').collect();
-        if parts.len() != 3 {
+        if parts.len() != 4 {
             continue;
         }
 
         let name = parts[0].to_string();
         let timestamp: i64 = parts[1].parse().unwrap_or(0);
         let sha = parts[2].to_string();
+        let author = parts[3].to_string();
 
         // Skip HEAD pointer and default branch
         if name == "origin/HEAD" || name == format!("origin/{}", default_branch) {
@@ -195,6 +198,7 @@ fn list_remote_branches(default_branch: &str) -> Result<Vec<Branch>> {
             is_remote: true,
             last_commit_sha: sha,
             last_commit_date: commit_date,
+            last_commit_user: author,
         });
     }
 

@@ -17,6 +17,8 @@ pub struct Branch {
     pub last_commit_sha: String,
     /// Date of the last commit
     pub last_commit_date: DateTime<Utc>,
+    /// Author of the last commit
+    pub last_commit_user: String,
 }
 
 impl Branch {
@@ -174,6 +176,7 @@ mod tests {
             is_remote,
             last_commit_sha: "abc123".to_string(),
             last_commit_date: Utc::now(),
+            last_commit_user: "testuser".to_string(),
         }
     }
 

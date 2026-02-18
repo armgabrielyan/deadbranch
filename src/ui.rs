@@ -78,6 +78,7 @@ pub fn display_branches(branches: &[Branch], title: &str) {
         Cell::new("Status").add_attribute(Attribute::Bold),
         Cell::new("Type").add_attribute(Attribute::Bold),
         Cell::new("Last Commit").add_attribute(Attribute::Bold),
+        Cell::new("Last Commit User").add_attribute(Attribute::Bold),
     ]);
 
     for (i, branch) in branches.iter().enumerate() {
@@ -100,6 +101,7 @@ pub fn display_branches(branches: &[Branch], title: &str) {
             status,
             branch_type,
             Cell::new(branch.last_commit_date.format("%Y-%m-%d").to_string()).fg(Color::DarkGrey),
+            Cell::new(&branch.last_commit_user),
         ]);
     }
 
