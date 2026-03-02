@@ -48,7 +48,7 @@ pub enum Commands {
         force: bool,
 
         /// Show what would be deleted without doing it
-        #[arg(long)]
+        #[arg(long, conflicts_with = "interactive")]
         dry_run: bool,
 
         /// Only delete local branches
@@ -60,8 +60,12 @@ pub enum Commands {
         remote: bool,
 
         /// Skip confirmation prompts (useful for scripts)
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "interactive")]
         yes: bool,
+
+        /// Open interactive TUI for branch selection
+        #[arg(short, long)]
+        interactive: bool,
     },
 
     /// Manage configuration

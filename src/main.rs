@@ -49,7 +49,17 @@ fn main() -> Result<()> {
             local,
             remote,
             yes,
-        } => cmd_clean(days, merged, force, dry_run, local, remote, yes),
+            interactive,
+        } => cmd_clean(
+            days,
+            merged,
+            force,
+            dry_run,
+            local,
+            remote,
+            yes,
+            interactive,
+        ),
 
         Commands::Config { action } => cmd_config(action),
 
@@ -139,6 +149,7 @@ fn cmd_list(
 }
 
 /// Clean (delete) stale branches
+#[allow(clippy::too_many_arguments)]
 fn cmd_clean(
     days: Option<u32>,
     merged: bool,
@@ -147,6 +158,7 @@ fn cmd_clean(
     local_only: bool,
     remote_only: bool,
     skip_confirm: bool,
+    interactive: bool,
 ) -> Result<()> {
     let config = Config::load()?;
 
@@ -190,6 +202,11 @@ fn cmd_clean(
 
     if branches.is_empty() {
         ui::info("No branches to delete.");
+        return Ok(());
+    }
+
+    if interactive {
+        ui::info("Interactive TUI mode coming soon.");
         return Ok(());
     }
 

@@ -31,6 +31,10 @@ comfy-table = "7.2"           # Beautiful tables
 dialoguer = "0.12"            # Interactive prompts (confirm, select, input)
 indicatif = "0.18"            # Progress bars and spinners
 
+# Interactive TUI
+ratatui = "0.29"              # Full-screen terminal UI framework
+crossterm = "0.28"            # Terminal backend (events, raw mode)
+
 # Date & Time
 chrono = "0.4"                # Date/time handling
 
