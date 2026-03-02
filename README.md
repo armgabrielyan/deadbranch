@@ -25,6 +25,7 @@
 - [Usage](#️-usage)
   - [List Stale Branches](#-list-stale-branches)
   - [Delete Stale Branches](#️-delete-stale-branches)
+  - [Interactive Mode](#️-interactive-mode)
   - [Dry Run Mode](#-dry-run-mode)
   - [Configuration](#️-configuration)
   - [Backup Management](#-backup-management)
@@ -52,6 +53,7 @@
 - 💾 **Backup creation** — Saves deleted branch SHAs for easy restoration
 - 👁️ **Dry-run mode** — Preview what would be deleted without making changes
 - 🌐 **Local & remote** — Works with both local and remote branches
+- 🖥️ **Interactive TUI mode** — Browse, filter, and select branches visually with `-i`
 
 ## 📦 Installation
 
@@ -250,6 +252,43 @@ Deleting local branches...
 ✓ Deleted 2 local branches
   ↪ Backup: ~/.deadbranch/backups/my-repo/backup-20250201-143022.txt
 ```
+
+### 🖥️ Interactive Mode
+
+Open a full-screen TUI for browsing, filtering, and selecting branches to delete:
+
+```bash
+deadbranch clean -i [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-i, --interactive` | Open interactive TUI for branch selection |
+| `-d, --days <N>` | Pre-filter to branches older than N days |
+| `--merged` | Start with merged-only filter active |
+| `--force` | Unlock unmerged branches for selection |
+| `--local` | Start with local-only filter active |
+| `--remote` | Start with remote-only filter active |
+
+**Key bindings:**
+
+| Key | Action |
+|-----|--------|
+| `↑`/`k`, `↓`/`j` | Navigate |
+| `Space` | Toggle selection |
+| `a` | Select all merged |
+| `A` | Select all (requires `--force`) |
+| `n` | Deselect all |
+| `d` | Delete selected |
+| `/` | Search by branch name |
+| `s` | Cycle sort (age → name → status) |
+| `m` | Toggle merged-only filter |
+| `l` | Toggle local-only filter |
+| `R` | Toggle remote-only filter |
+| `?` | Help |
+| `q`/`Esc` | Quit |
+
+**Note:** `-i` cannot be combined with `-y` (skip confirmation) or `--dry-run`.
 
 ### 🔍 Dry Run Mode
 
@@ -467,7 +506,7 @@ Exclude patterns support glob-style wildcards:
 
 ## 🗺️ Roadmap
 
-- [ ] 🖥️ Interactive TUI mode
+- [x] 🖥️ Interactive TUI mode
 - [ ] 👤 `--only-mine` flag for personal branches
 - [ ] 🔗 GitHub/GitLab PR detection
 - [ ] 📊 Multiple output formats (JSON, CSV)
