@@ -3,7 +3,7 @@
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
 use super::app::{App, Mode};
@@ -17,6 +17,7 @@ const SHADE: &str = "\u{2591}"; // ░
 const CHECK: &str = "\u{2713}"; // ✓
 const CROSS: &str = "\u{2717}"; // ✗
 const WARN: &str = "\u{26a0}"; // ⚠
+const SEP: &str = "\u{2502}"; // │
 
 // ── Colours ─────────────────────────────────────────────────────────
 
@@ -30,6 +31,11 @@ const WHITE: Color = Color::White;
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
+/// Create a thin vertical separator cell.
+fn sep_cell<'a>() -> Cell<'a> {
+    Cell::from(SEP).style(Style::default().fg(GRAY))
+}
+
 /// Truncate a string to `max_len` characters, appending ".." if truncated.
 /// Uses char-level counting instead of byte slicing for UTF-8 safety.
 fn truncate_name(name: &str, max_len: usize) -> String {
@@ -41,10 +47,35 @@ fn truncate_name(name: &str, max_len: usize) -> String {
     }
 }
 
+/// Compute a centered rectangle for dialog boxes.
+/// Uses percentage of terminal width (min 50 chars) and fits content height.
+fn centered_dialog(area: Rect, content_lines: u16) -> Rect {
+    let width = (area.width * 6 / 10).max(50).min(area.width);
+    let height = (content_lines + 4).min(area.height); // +4 for border + padding
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    Rect::new(area.x + x, area.y + y, width, height)
+}
+
+/// Render a styled footer hint line at the bottom of a dialog.
+fn draw_footer_hints(frame: &mut Frame, area: Rect, hints: Vec<(&str, &str)>) {
+    let spans: Vec<Span> = hints
+        .into_iter()
+        .flat_map(|(key, desc)| {
+            vec![
+                Span::styled(format!(" {}", key), Style::default().fg(CYAN)),
+                Span::styled(format!(" {} ", desc), Style::default().fg(GRAY)),
+            ]
+        })
+        .collect();
+    let line = Line::from(spans);
+    frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+}
+
 // ── Main draw dispatch ──────────────────────────────────────────────
 
 /// Top-level draw function: dispatches to mode-specific renderers.
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, app: &mut App) {
     match app.mode {
         Mode::Browse | Mode::Filter => draw_browse(frame, app),
         Mode::Confirm => draw_confirm(frame, app),
@@ -59,7 +90,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
 // ── Browse mode ─────────────────────────────────────────────────────
 
-fn draw_browse(frame: &mut Frame, app: &App) {
+fn draw_browse(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
@@ -145,7 +176,15 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(header, area);
 }
 
-fn draw_branch_list(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    // Center table at ~70% of terminal width
+    let table_width = (area.width * 7 / 10).max(60);
+    let margin = (area.width.saturating_sub(table_width)) / 2;
+    let area = Rect {
+        x: area.x + margin,
+        width: table_width,
+        ..area
+    };
     if app.visible.is_empty() {
         let msg = if app.search_query.is_empty() {
             "No branches match current filters"
@@ -160,130 +199,85 @@ fn draw_branch_list(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let list_height = area.height as usize;
-    let mut lines: Vec<Line> = Vec::new();
-
-    // Build all lines with their row indices (for scrolling)
-    let mut row_lines: Vec<(Option<usize>, Line)> = Vec::new();
-
-    // Compute column layout that fills the terminal width proportionally.
-    // Fixed content widths: prefix(6) + age(5) + status(8) + type(6) + date(10) = 35
-    // Gaps: 4 gaps between columns (after name, after age, after status, after type)
-    // Name: sized to longest branch name (min 15)
-    let max_name_len = app
-        .visible
-        .iter()
-        .map(|&i| app.all_branches[i].name.chars().count())
-        .max()
-        .unwrap_or(10)
-        .max(15);
-    let base_content = 6 + 1 + max_name_len + 5 + 8 + 6 + 10; // prefix + space + name + age + status + type + date
-    let min_gaps = 4 * 2; // minimum 2 spaces per gap
-    let term_width = area.width as usize;
-    let extra = term_width.saturating_sub(base_content + min_gaps);
-
-    // Distribute extra: 40% to name stretch, 40% split across 4 column gaps, 20% as left margin
-    let name_extra = extra * 2 / 5;
-    let gaps_extra = extra * 2 / 5;
-    let margin = extra.saturating_sub(name_extra + gaps_extra);
-
-    let name_col_width = (max_name_len + name_extra).min(term_width / 2);
-    let gap = 2 + gaps_extra / 4; // base gap of 2 + distributed extra
-    let margin_str: String = " ".repeat(margin / 2); // center bias
-
-    let gap_str: String = " ".repeat(gap);
-
-    // Column headers
-    // Prefix that aligns with the cursor column start: margin + 1 space
-    let cursor_align: String = format!("{} ", margin_str);
-    // Prefix that aligns with the start of the Branch/name column:
-    // margin + cursor(3) + checkbox(3) + space(1) = margin + 7
-    let name_align: String = format!("{}       ", margin_str);
-
-    // Column header text (no underline — we draw a separate line below)
-    let header_style = Style::default().fg(GRAY).add_modifier(Modifier::BOLD);
-    row_lines.push((
-        None,
-        Line::from(vec![
-            Span::styled(format!("{}      ", margin_str), header_style),
-            Span::styled(
-                format!(" {:<width$}", "Branch", width = name_col_width),
-                header_style,
-            ),
-            Span::styled(format!("{}{:>5}", gap_str, "Age"), header_style),
-            Span::styled(format!("{}Status  ", gap_str), header_style),
-            Span::styled(format!("{}Type  ", gap_str), header_style),
-            Span::styled(format!("{}Last Commit", gap_str), header_style),
-        ]),
-    ));
-    // Horizontal separator: symmetric overhang on both sides of the table content
-    // Left overhang = distance from cursor_align to name_align = 6 chars
-    let overhang = 6;
-    let table_content_width = 1 + name_col_width + gap + 5 + gap + 8 + gap + 6 + gap + 10;
-    let separator: String = "\u{2500}".repeat(overhang + table_content_width + overhang); // ─
-    row_lines.push((
-        None,
-        Line::from(Span::styled(
-            format!("{}{}", cursor_align, separator),
-            Style::default().fg(GRAY),
-        )),
-    ));
-
+    // Build table rows and track cursor-to-table-row mapping
+    let mut rows: Vec<Row> = Vec::new();
+    let mut cursor_table_row: usize = 0;
     let mut last_was_merged: Option<bool> = None;
 
     for (row_idx, &branch_idx) in app.visible.iter().enumerate() {
         let branch = &app.all_branches[branch_idx];
 
-        // Section headers — aligned with name column
+        // Section header when merge status changes
         if last_was_merged != Some(branch.is_merged) {
-            // Two blank lines before section headers for clear separation from column headers
-            row_lines.push((None, Line::from("")));
-            row_lines.push((None, Line::from("")));
-            if branch.is_merged {
-                row_lines.push((
-                    None,
-                    Line::from(Span::styled(
-                        format!("{}MERGED (safe to delete)", name_align),
-                        Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-                    )),
-                ));
+            let (label, color) = if branch.is_merged {
+                ("MERGED (safe to delete)", GREEN)
+            } else if app.force {
+                ("UNMERGED (review carefully)", YELLOW)
             } else {
-                let label = if app.force {
-                    "UNMERGED (review carefully)"
-                } else {
-                    "UNMERGED (use --force to unlock)"
-                };
-                row_lines.push((
-                    None,
-                    Line::from(Span::styled(
-                        format!("{}{}", name_align, label),
-                        Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
-                    )),
-                ));
+                ("UNMERGED (use --force to unlock)", YELLOW)
+            };
+            // Top margin via bottom_margin on previous row, or empty spacer row
+            if !rows.is_empty() {
+                // Add a blank spacer row before section header
+                rows.push(Row::new(vec![Cell::from(""); 10]));
             }
+            rows.push(
+                Row::new(vec![
+                    Cell::from(""),
+                    sep_cell(),
+                    Cell::from(Span::styled(
+                        label,
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    )),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                ])
+                .bottom_margin(0),
+            );
             last_was_merged = Some(branch.is_merged);
         }
 
-        // Branch row
+        // Track which table row the cursor points to
+        if row_idx == app.cursor {
+            cursor_table_row = rows.len();
+        }
+
+        // Build the selector cell (cursor + checkbox)
         let is_focused = row_idx == app.cursor;
         let is_locked = !branch.is_merged && !app.force;
         let is_selected = app.selected[branch_idx];
 
-        let cursor_span = if is_focused {
-            Span::styled(
-                format!("{} {} ", margin_str, CURSOR),
-                Style::default().fg(WHITE),
-            )
+        let selector = if is_locked {
+            if is_focused {
+                Line::from(vec![
+                    Span::styled(format!("{} ", CURSOR), Style::default().fg(WHITE)),
+                    Span::styled(format!("{}{}", SHADE, SHADE), Style::default().fg(GRAY)),
+                ])
+            } else {
+                Line::from(Span::styled(
+                    format!("  {}{}", SHADE, SHADE),
+                    Style::default().fg(GRAY),
+                ))
+            }
+        } else if is_focused {
+            let cb = if is_selected { "[x]" } else { "[ ]" };
+            let cb_color = if is_selected { GREEN } else { GRAY };
+            Line::from(vec![
+                Span::styled(format!("{} ", CURSOR), Style::default().fg(WHITE)),
+                Span::styled(cb, Style::default().fg(cb_color)),
+            ])
         } else {
-            Span::raw(format!("{}   ", margin_str))
-        };
-
-        let checkbox_span = if is_locked {
-            Span::styled(format!("{}{}", SHADE, SHADE), Style::default().fg(GRAY))
-        } else if is_selected {
-            Span::styled("[x]", Style::default().fg(GREEN))
-        } else {
-            Span::styled("[ ]", Style::default().fg(GRAY))
+            let cb = if is_selected { "[x]" } else { "[ ]" };
+            let cb_color = if is_selected { GREEN } else { GRAY };
+            Line::from(Span::styled(
+                format!("  {}", cb),
+                Style::default().fg(cb_color),
+            ))
         };
 
         let name_style = if is_locked {
@@ -294,86 +288,89 @@ fn draw_branch_list(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(WHITE)
         };
 
-        // Truncate name to fit the dynamic column width
-        let display_name = truncate_name(&branch.name, name_col_width);
-        let name_span = Span::styled(
-            format!(" {:<width$}", display_name, width = name_col_width),
-            name_style,
-        );
-
-        let age_span = Span::styled(
-            format!("{}{:>4}d", gap_str, branch.age_days),
-            Style::default().fg(GRAY),
-        );
-
-        let status_span = if branch.is_merged {
-            Span::styled(format!("{}merged  ", gap_str), Style::default().fg(GREEN))
+        let (status_text, status_color) = if branch.is_merged {
+            ("merged", GREEN)
         } else {
-            Span::styled(format!("{}unmerged", gap_str), Style::default().fg(YELLOW))
+            ("unmerged", YELLOW)
         };
 
-        let type_span = if branch.is_remote {
-            Span::styled(format!("{}remote", gap_str), Style::default().fg(BLUE))
+        let (type_text, type_color) = if branch.is_remote {
+            ("remote", BLUE)
         } else {
-            Span::styled(format!("{}local ", gap_str), Style::default().fg(CYAN))
+            ("local", CYAN)
         };
 
         let date_str = branch.last_commit_date.format("%Y-%m-%d").to_string();
-        let date_span = Span::styled(
-            format!("{}{}", gap_str, date_str),
-            Style::default().fg(GRAY),
-        );
 
-        let line = Line::from(vec![
-            cursor_span,
-            checkbox_span,
-            name_span,
-            age_span,
-            status_span,
-            type_span,
-            date_span,
-        ]);
-
-        row_lines.push((Some(row_idx), line));
+        rows.push(Row::new(vec![
+            Cell::from(selector),
+            sep_cell(),
+            Cell::from(truncate_name(&branch.name, 60)).style(name_style),
+            sep_cell(),
+            Cell::from(format!("{}d", branch.age_days)).style(Style::default().fg(GRAY)),
+            sep_cell(),
+            Cell::from(status_text).style(Style::default().fg(status_color)),
+            sep_cell(),
+            Cell::from(type_text).style(Style::default().fg(type_color)),
+            Cell::from(date_str).style(Style::default().fg(GRAY)),
+        ]));
     }
 
-    // Compute scroll offset to keep cursor visible
-    let scroll_offset = compute_scroll_offset(app, &row_lines, list_height);
+    // Column widths: data columns with thin separator columns between them
+    let widths = [
+        Constraint::Length(5),  // selector: "▶ [x]"
+        Constraint::Length(1),  // separator │
+        Constraint::Fill(1),    // branch name: fills remaining space
+        Constraint::Length(1),  // separator │
+        Constraint::Length(6),  // age: "1234d"
+        Constraint::Length(1),  // separator │
+        Constraint::Length(8),  // status: "unmerged"
+        Constraint::Length(1),  // separator │
+        Constraint::Length(6),  // type: "remote"
+        Constraint::Length(11), // date: "Last Commit" / "2026-01-27"
+    ];
 
-    for (_, line) in row_lines.into_iter().skip(scroll_offset).take(list_height) {
-        lines.push(line);
-    }
+    // Header row
+    let header_style = Style::default().fg(GRAY).add_modifier(Modifier::BOLD);
+    let sep_header = Cell::from(SEP).style(Style::default().fg(GRAY));
+    let header = Row::new(vec![
+        Cell::from(""),
+        sep_header.clone(),
+        Cell::from("Branch").style(header_style),
+        sep_header.clone(),
+        Cell::from("Age").style(header_style),
+        sep_header.clone(),
+        Cell::from("Status").style(header_style),
+        sep_header,
+        Cell::from("Type").style(header_style),
+        Cell::from("Last Commit").style(header_style),
+    ]);
 
-    let paragraph = Paragraph::new(lines);
-    frame.render_widget(paragraph, area);
-}
+    // Horizontal rule row between header and data
+    let hr_style = Style::default().fg(GRAY);
+    let hr = |width: u16| Cell::from("\u{2500}".repeat(width as usize)).style(hr_style);
+    let hr_row = Row::new(vec![
+        hr(5),                                  // selector
+        Cell::from("\u{253c}").style(hr_style), // ┼
+        hr(200),                                // branch (clipped by Fill constraint)
+        Cell::from("\u{253c}").style(hr_style), // ┼
+        hr(6),                                  // age
+        Cell::from("\u{253c}").style(hr_style), // ┼
+        hr(8),                                  // status
+        Cell::from("\u{253c}").style(hr_style), // ┼
+        hr(6),                                  // type
+        hr(11),                                 // date
+    ]);
 
-/// Compute the scroll offset so the cursor row stays visible.
-fn compute_scroll_offset(
-    app: &App,
-    row_lines: &[(Option<usize>, Line)],
-    list_height: usize,
-) -> usize {
-    // Find the line index of the cursor
-    let cursor_line = row_lines
-        .iter()
-        .position(|(row_idx, _)| *row_idx == Some(app.cursor))
-        .unwrap_or(0);
+    // Insert the horizontal rule as the first data row, shifting cursor mapping
+    rows.insert(0, hr_row);
+    cursor_table_row += 1;
 
-    let current_offset = app.scroll_offset.get();
+    let table = Table::new(rows, widths).header(header).column_spacing(1);
 
-    let new_offset = if cursor_line < current_offset {
-        // Cursor is above the visible area
-        cursor_line
-    } else if cursor_line >= current_offset + list_height {
-        // Cursor is below the visible area
-        cursor_line.saturating_sub(list_height - 1)
-    } else {
-        current_offset
-    };
-
-    app.scroll_offset.set(new_offset);
-    new_offset
+    // Update table state for auto-scrolling
+    app.table_state.select(Some(cursor_table_row));
+    frame.render_stateful_widget(table, area, &mut app.table_state);
 }
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -458,15 +455,6 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_confirm(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    let block = Block::default()
-        .title(" Confirm Deletion ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(YELLOW));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let mut lines: Vec<Line> = Vec::new();
-
     // Gather selected branches grouped by merge status
     let mut safe: Vec<&crate::branch::Branch> = Vec::new();
     let mut dangerous: Vec<&crate::branch::Branch> = Vec::new();
@@ -480,6 +468,39 @@ fn draw_confirm(frame: &mut Frame, app: &App) {
             }
         }
     }
+
+    // Compute content height for centering
+    let safe_lines = if safe.is_empty() {
+        0
+    } else {
+        safe.len() as u16 + 2
+    }; // header + items + blank
+    let danger_lines = if dangerous.is_empty() {
+        0
+    } else {
+        dangerous.len() as u16 + 2
+    };
+    let content_height = safe_lines
+        + danger_lines
+        + 5 // separator + summary + backup + blank + prompt
+        + 1; // footer hints
+
+    let dialog = centered_dialog(area, content_height);
+    frame.render_widget(Clear, dialog);
+
+    let block = Block::default()
+        .title(" Confirm Deletion ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(YELLOW));
+    let inner = block.inner(dialog);
+    frame.render_widget(block, dialog);
+
+    // Split inner into content area + footer hint line
+    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let content_area = chunks[0];
+    let footer_area = chunks[1];
+
+    let mut lines: Vec<Line> = Vec::new();
 
     // Safe section
     if !safe.is_empty() {
@@ -531,32 +552,27 @@ fn draw_confirm(frame: &mut Frame, app: &App) {
         lines.push(Line::from(""));
     }
 
-    // Summary
+    // Horizontal separator
+    let sep_width = inner.width.saturating_sub(4) as usize;
+    lines.push(Line::from(Span::styled(
+        format!("  {}", "\u{2500}".repeat(sep_width)),
+        Style::default().fg(GRAY),
+    )));
+
+    // Summary line
     let total = safe.len() + dangerous.len();
     let remote_count: usize = safe
         .iter()
         .chain(dangerous.iter())
         .filter(|b| b.is_remote)
         .count();
+    let mut summary_parts = vec![format!("{} branches", total)];
+    if remote_count > 0 {
+        summary_parts.push(format!("{} remote", remote_count));
+    }
+    summary_parts.push("backup auto-created".to_string());
     lines.push(Line::from(Span::styled(
-        format!(
-            "  {} branches will be deleted{}",
-            total,
-            if remote_count > 0 {
-                format!(" ({} remote)", remote_count)
-            } else {
-                String::new()
-            }
-        ),
-        Style::default().fg(WHITE),
-    )));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  A backup will be created automatically",
-        Style::default().fg(GRAY),
-    )));
-    lines.push(Line::from(Span::styled(
-        "  Restore with: deadbranch backup restore <branch-name>",
+        format!("  {} {}", DOT, summary_parts.join(" {} ")),
         Style::default().fg(GRAY),
     )));
     lines.push(Line::from(""));
@@ -564,35 +580,58 @@ fn draw_confirm(frame: &mut Frame, app: &App) {
     // Confirmation prompt
     if app.requires_strict_confirm() {
         lines.push(Line::from(vec![
-            Span::styled(
-                "  Type 'yes' to confirm, Esc to go back: ",
-                Style::default().fg(YELLOW),
-            ),
+            Span::styled("  Type 'yes' to confirm: ", Style::default().fg(YELLOW)),
             Span::styled(&app.confirm_input, Style::default().fg(WHITE)),
             Span::styled(BLOCK, Style::default().fg(YELLOW)),
         ]));
     } else {
         lines.push(Line::from(Span::styled(
-            "  Press Enter or y to confirm, Esc to go back",
+            "  Press Enter or y to confirm",
             Style::default().fg(GRAY),
         )));
     }
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, inner);
+    frame.render_widget(paragraph, content_area);
+
+    // Footer hints
+    draw_footer_hints(
+        frame,
+        footer_area,
+        vec![("Enter/y", "confirm"), ("Esc", "back")],
+    );
 }
 
 // ── Executing mode ──────────────────────────────────────────────────
 
 fn draw_executing(frame: &mut Frame, app: &App) {
     let area = frame.area();
+    let total = app.selected_count();
+    let completed = app.deletion_results.len();
+
+    // Compute content height: backup line + results + pending indicator + gauge
+    let backup_lines: u16 = if app.backup_path.is_some() { 2 } else { 0 };
+    let content_height = backup_lines + completed as u16 + 3; // +3 for blank + gauge + blank
+
+    let dialog = centered_dialog(area, content_height);
+    frame.render_widget(Clear, dialog);
 
     let block = Block::default()
-        .title(" Deleting branches ")
+        .title(" Deleting Branches ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CYAN));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = block.inner(dialog);
+    frame.render_widget(block, dialog);
+
+    // Split: content area on top, gauge at bottom
+    let chunks = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+    let content_area = chunks[0];
+    let gauge_area = chunks[1];
 
     let mut lines: Vec<Line> = Vec::new();
 
@@ -604,7 +643,6 @@ fn draw_executing(frame: &mut Frame, app: &App) {
         lines.push(Line::from(""));
     }
 
-    let total = app.selected_count();
     for result in &app.deletion_results {
         let (icon, color) = if result.success {
             (CHECK, GREEN)
@@ -621,17 +659,34 @@ fn draw_executing(frame: &mut Frame, app: &App) {
         lines.push(Line::from(spans));
     }
 
-    let completed = app.deletion_results.len();
-    if completed < total {
-        lines.push(Line::from(""));
+    // Show pending branches with dimmed style
+    let pending_count = total.saturating_sub(completed);
+    if pending_count > 0 {
         lines.push(Line::from(Span::styled(
-            format!("  {} of {} completed", completed, total),
+            format!("  {} deleting...", DOT),
             Style::default().fg(GRAY),
         )));
     }
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, inner);
+    frame.render_widget(paragraph, content_area);
+
+    // Progress gauge
+    let ratio = if total > 0 {
+        completed as f64 / total as f64
+    } else {
+        0.0
+    };
+    let gauge_label = Span::styled(
+        format!(" {}/{} ", completed, total),
+        Style::default().fg(WHITE),
+    );
+    let gauge = Gauge::default()
+        .gauge_style(Style::default().fg(CYAN))
+        .ratio(ratio)
+        .label(gauge_label)
+        .use_unicode(true);
+    frame.render_widget(gauge, gauge_area);
 }
 
 // ── Summary mode ────────────────────────────────────────────────────
@@ -639,28 +694,78 @@ fn draw_executing(frame: &mut Frame, app: &App) {
 fn draw_summary(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    let block = Block::default()
-        .title(" Done ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(GREEN));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let mut lines: Vec<Line> = Vec::new();
-
     let successes = app.deletion_results.iter().filter(|r| r.success).count();
     let failures = app.deletion_results.iter().filter(|r| !r.success).count();
 
-    lines.push(Line::from(Span::styled(
-        format!("  {} deleted {} {} failed", successes, DOT, failures),
-        Style::default().fg(if failures > 0 { YELLOW } else { GREEN }),
-    )));
-    lines.push(Line::from(""));
+    // Compute content height
+    let failure_lines: u16 = if failures > 0 { failures as u16 + 2 } else { 0 }; // header + items + blank
+    let restore_lines: u16 = if successes > 0 { 3 } else { 0 }; // header + command + blank
+    let content_height = 3 + failure_lines + restore_lines + 1; // hero + blank + separator + footer
+
+    let dialog = centered_dialog(area, content_height);
+    frame.render_widget(Clear, dialog);
+
+    let border_color = if failures > 0 { YELLOW } else { GREEN };
+    let block = Block::default()
+        .title(" Done ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color));
+    let inner = block.inner(dialog);
+    frame.render_widget(block, dialog);
+
+    // Split: content + footer
+    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let content_area = chunks[0];
+    let footer_area = chunks[1];
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Prominent centered result line
+    lines.push(Line::from("")); // top padding
+    if failures == 0 {
+        lines.push(
+            Line::from(vec![
+                Span::styled(
+                    format!("{} ", CHECK),
+                    Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{} deleted", successes),
+                    Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+                ),
+            ])
+            .alignment(Alignment::Center),
+        );
+    } else {
+        lines.push(
+            Line::from(vec![
+                Span::styled(
+                    format!("{} ", CHECK),
+                    Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{} deleted", successes),
+                    Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("  {}  ", DOT), Style::default().fg(GRAY)),
+                Span::styled(
+                    format!("{} ", CROSS),
+                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{} failed", failures),
+                    Style::default().fg(RED).add_modifier(Modifier::BOLD),
+                ),
+            ])
+            .alignment(Alignment::Center),
+        );
+    }
+    lines.push(Line::from("")); // spacing after hero
 
     // List failures
     if failures > 0 {
         lines.push(Line::from(Span::styled(
-            "  Failures:",
+            "  Failed:",
             Style::default().fg(RED).add_modifier(Modifier::BOLD),
         )));
         for result in app.deletion_results.iter().filter(|r| !r.success) {
@@ -677,11 +782,7 @@ fn draw_summary(frame: &mut Frame, app: &App) {
     // Restore info
     if successes > 0 {
         lines.push(Line::from(Span::styled(
-            "  To restore:",
-            Style::default().fg(GRAY),
-        )));
-        lines.push(Line::from(Span::styled(
-            "    deadbranch backup list",
+            "  Restore:",
             Style::default().fg(GRAY),
         )));
         lines.push(Line::from(Span::styled(
@@ -691,13 +792,11 @@ fn draw_summary(frame: &mut Frame, app: &App) {
         lines.push(Line::from(""));
     }
 
-    lines.push(Line::from(Span::styled(
-        "  Press any key to exit",
-        Style::default().fg(GRAY),
-    )));
-
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, inner);
+    frame.render_widget(paragraph, content_area);
+
+    // Footer
+    draw_footer_hints(frame, footer_area, vec![("any key", "exit")]);
 }
 
 // ── Help overlay ────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 //! Core state management for the TUI
 
-use std::cell::Cell;
+use ratatui::widgets::TableState;
 
 use crate::branch::{Branch, BranchFilter};
 
@@ -120,8 +120,8 @@ pub struct App {
     pub execution_done: bool,
     /// Whether the help overlay is shown
     pub show_help: bool,
-    /// Scroll offset for the branch list
-    pub scroll_offset: Cell<usize>,
+    /// Table state for the branch list (manages scroll offset)
+    pub table_state: TableState,
     /// Branches remaining to be deleted (for incremental deletion)
     pub pending_deletions: Vec<Branch>,
 }
@@ -158,7 +158,7 @@ impl App {
             backup_path: None,
             execution_done: false,
             show_help: false,
-            scroll_offset: Cell::new(0),
+            table_state: TableState::default(),
             pending_deletions: Vec::new(),
             all_branches,
         };
