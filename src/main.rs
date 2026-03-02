@@ -7,6 +7,8 @@ mod config;
 mod error;
 mod git;
 mod stats;
+#[allow(dead_code)]
+mod tui;
 mod ui;
 
 use anyhow::{Context, Result};
