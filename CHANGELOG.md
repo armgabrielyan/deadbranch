@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.3](https://github.com/armgabrielyan/deadbranch/compare/v0.1.2...v0.1.3) (2026-03-02)
+
+
+### Features
+
+* add man page generation and distribution ([c182dc6](https://github.com/armgabrielyan/deadbranch/commit/c182dc6ad9b164ba89a2260069bccbcadcbcb389))
+* add shell completions ([3da6175](https://github.com/armgabrielyan/deadbranch/commit/3da61752bb49cba8abdc524569605b2405b747f1))
+
+
+### Bug Fixes
+
+* add #number to backup stats command table ([c5d931f](https://github.com/armgabrielyan/deadbranch/commit/c5d931f67eeaed80b000c3e50473891136581c09))
+
 ## [0.1.2](https://github.com/armgabrielyan/deadbranch/compare/v0.1.1...v0.1.2) (2026-02-07)
 
 
