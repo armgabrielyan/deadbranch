@@ -95,6 +95,10 @@ pub struct App {
     pub backup_path: Option<String>,
     /// Whether execution has finished
     pub execution_done: bool,
+    /// Whether the help overlay is shown
+    pub show_help: bool,
+    /// Scroll offset for the branch list
+    pub scroll_offset: usize,
 }
 
 impl App {
@@ -127,6 +131,8 @@ impl App {
             deletion_results: Vec::new(),
             backup_path: None,
             execution_done: false,
+            show_help: false,
+            scroll_offset: 0,
             all_branches,
         };
 
@@ -346,6 +352,13 @@ impl App {
             self.filter_local_only = false;
         }
         self.update_visible();
+    }
+
+    // ── Help ────────────────────────────────────────────────────────
+
+    /// Toggle the help overlay
+    pub fn toggle_help(&mut self) {
+        self.show_help = !self.show_help;
     }
 }
 

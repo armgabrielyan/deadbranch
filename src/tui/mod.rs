@@ -2,6 +2,8 @@
 
 #[allow(dead_code)]
 mod app;
+mod event;
+mod render;
 
 use anyhow::Result;
 
@@ -16,6 +18,6 @@ pub fn run_interactive(
     default_branch: &str,
     force: bool,
 ) -> Result<()> {
-    let _app = app::App::new(all_branches, initial_filter, default_branch, force);
-    Ok(())
+    let mut app = app::App::new(all_branches, initial_filter, default_branch, force);
+    event::run(&mut app)
 }
