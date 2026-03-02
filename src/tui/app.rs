@@ -22,30 +22,49 @@ pub enum Mode {
 /// Sort order for the branch list
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
+    /// Sort by branch name (alphabetical)
+    Branch,
     /// Sort by age (oldest first)
     Age,
-    /// Sort by name (alphabetical)
-    Name,
     /// Sort by merge status (merged first)
     Status,
+    /// Sort by type (local first)
+    Type,
+    /// Sort by last commit date (oldest first)
+    LastCommit,
 }
 
 impl SortOrder {
-    /// Cycle to the next sort order
+    /// Cycle to the next sort order (matches column order: Branch, Age, Status, Type, Last Commit)
     pub fn next(self) -> Self {
         match self {
-            SortOrder::Age => SortOrder::Name,
-            SortOrder::Name => SortOrder::Status,
-            SortOrder::Status => SortOrder::Age,
+            SortOrder::Branch => SortOrder::Age,
+            SortOrder::Age => SortOrder::Status,
+            SortOrder::Status => SortOrder::Type,
+            SortOrder::Type => SortOrder::LastCommit,
+            SortOrder::LastCommit => SortOrder::Branch,
         }
     }
 
     /// Human-readable label for the current sort order
     pub fn label(self) -> &'static str {
         match self {
+            SortOrder::Branch => "Branch",
             SortOrder::Age => "Age",
-            SortOrder::Name => "Name",
             SortOrder::Status => "Status",
+            SortOrder::Type => "Type",
+            SortOrder::LastCommit => "Last Commit",
+        }
+    }
+
+    /// Default sort direction for this column (true = ascending)
+    pub fn default_ascending(self) -> bool {
+        match self {
+            SortOrder::Branch => true,      // A → Z
+            SortOrder::Age => false,        // oldest first
+            SortOrder::Status => true,      // merged first
+            SortOrder::Type => true,        // local first
+            SortOrder::LastCommit => false, // oldest first
         }
     }
 }
@@ -80,6 +99,8 @@ pub struct App {
 
     /// Current sort order
     pub sort_order: SortOrder,
+    /// Whether sort is ascending (false = descending)
+    pub sort_ascending: bool,
     /// Filter toggle: only show merged branches
     pub filter_merged_only: bool,
     /// Filter toggle: only show local branches
@@ -127,6 +148,7 @@ impl App {
             force,
             default_branch: default_branch.to_string(),
             sort_order: SortOrder::Age,
+            sort_ascending: SortOrder::Age.default_ascending(),
             filter_merged_only: initial_filter.merged_only,
             filter_local_only: initial_filter.local_only,
             filter_remote_only: initial_filter.remote_only,
@@ -185,11 +207,12 @@ impl App {
         }
     }
 
-    /// Sort the visible indices by the current sort order.
+    /// Sort the visible indices by the current sort order and direction.
     /// Always groups merged and unmerged branches together.
     pub fn sort_visible(&mut self) {
         let branches = &self.all_branches;
         let sort_order = self.sort_order;
+        let ascending = self.sort_ascending;
 
         self.visible.sort_by(|&a, &b| {
             let ba = &branches[a];
@@ -201,14 +224,19 @@ impl App {
                 return merge_cmp;
             }
 
-            // Within each group, sort by the chosen order
-            match sort_order {
-                SortOrder::Age => bb.age_days.cmp(&ba.age_days),
-                SortOrder::Name => ba.name.cmp(&bb.name),
-                SortOrder::Status => {
-                    // Within merged/unmerged group, sort by age as secondary
-                    bb.age_days.cmp(&ba.age_days)
-                }
+            // Within each group, sort ascending then flip if descending
+            let cmp = match sort_order {
+                SortOrder::Branch => ba.name.cmp(&bb.name),
+                SortOrder::Age => ba.age_days.cmp(&bb.age_days),
+                SortOrder::Status => ba.is_merged.cmp(&bb.is_merged),
+                SortOrder::Type => ba.is_remote.cmp(&bb.is_remote),
+                SortOrder::LastCommit => bb.last_commit_date.cmp(&ba.last_commit_date),
+            };
+
+            if ascending {
+                cmp
+            } else {
+                cmp.reverse()
             }
         });
     }
@@ -259,21 +287,33 @@ impl App {
         }
     }
 
-    /// Select all merged branches in the visible list
+    /// Toggle all merged branches in the visible list
     pub fn select_all_merged(&mut self) {
+        let all_merged_selected = self
+            .visible
+            .iter()
+            .filter(|&&idx| self.all_branches[idx].is_merged)
+            .all(|&idx| self.selected[idx]);
+
         for &idx in &self.visible {
             if self.all_branches[idx].is_merged {
-                self.selected[idx] = true;
+                self.selected[idx] = !all_merged_selected;
             }
         }
     }
 
-    /// Select all visible branches (requires force for unmerged)
+    /// Toggle all visible branches (requires force for unmerged)
     pub fn select_all(&mut self) {
+        let all_selectable_selected = self
+            .visible
+            .iter()
+            .filter(|&&idx| self.all_branches[idx].is_merged || self.force)
+            .all(|&idx| self.selected[idx]);
+
         for &idx in &self.visible {
             let branch = &self.all_branches[idx];
             if branch.is_merged || self.force {
-                self.selected[idx] = true;
+                self.selected[idx] = !all_selectable_selected;
             }
         }
     }
@@ -334,6 +374,13 @@ impl App {
     /// Cycle to the next sort order and re-sort
     pub fn cycle_sort(&mut self) {
         self.sort_order = self.sort_order.next();
+        self.sort_ascending = self.sort_order.default_ascending();
+        self.sort_visible();
+    }
+
+    /// Toggle the sort direction (ascending/descending) for the current column
+    pub fn toggle_sort_direction(&mut self) {
+        self.sort_ascending = !self.sort_ascending;
         self.sort_visible();
     }
 
@@ -594,6 +641,37 @@ mod tests {
     }
 
     #[test]
+    fn test_select_all_merged_toggles_off_when_all_selected() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        // Merged branches are pre-selected by App::new
+        assert_eq!(app.selected_count(), 3);
+
+        // Toggle off: all merged already selected → deselect merged
+        app.select_all_merged();
+        assert_eq!(app.selected_count(), 0);
+
+        // Toggle on: none selected → select merged
+        app.select_all_merged();
+        assert_eq!(app.selected_count(), 3);
+    }
+
+    #[test]
+    fn test_select_all_toggles_off_when_all_selected() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", true);
+        app.select_all();
+        let total = app.all_branches.len();
+        assert_eq!(app.selected_count(), total);
+
+        // Toggle off
+        app.select_all();
+        assert_eq!(app.selected_count(), 0);
+
+        // Toggle on
+        app.select_all();
+        assert_eq!(app.selected_count(), total);
+    }
+
+    #[test]
     fn test_selected_count() {
         let app = App::new(sample_branches(), &default_filter(), "main", false);
         // 3 merged branches are pre-selected
@@ -631,10 +709,16 @@ mod tests {
         assert_eq!(app.sort_order, SortOrder::Age);
 
         app.cycle_sort();
-        assert_eq!(app.sort_order, SortOrder::Name);
+        assert_eq!(app.sort_order, SortOrder::Status);
 
         app.cycle_sort();
-        assert_eq!(app.sort_order, SortOrder::Status);
+        assert_eq!(app.sort_order, SortOrder::Type);
+
+        app.cycle_sort();
+        assert_eq!(app.sort_order, SortOrder::LastCommit);
+
+        app.cycle_sort();
+        assert_eq!(app.sort_order, SortOrder::Branch);
 
         app.cycle_sort();
         assert_eq!(app.sort_order, SortOrder::Age);
@@ -664,9 +748,11 @@ mod tests {
 
     #[test]
     fn test_sort_order_labels() {
+        assert_eq!(SortOrder::Branch.label(), "Branch");
         assert_eq!(SortOrder::Age.label(), "Age");
-        assert_eq!(SortOrder::Name.label(), "Name");
         assert_eq!(SortOrder::Status.label(), "Status");
+        assert_eq!(SortOrder::Type.label(), "Type");
+        assert_eq!(SortOrder::LastCommit.label(), "Last Commit");
     }
 
     #[test]
@@ -685,7 +771,7 @@ mod tests {
     fn test_cycle_sort_changes_order() {
         // zebra is older (50d), alpha is newer (10d)
         // Age sort (oldest first) = zebra, alpha
-        // Name sort = alpha, zebra
+        // Branch sort (alphabetical) = alpha, zebra
         let branches = vec![
             test_branch("zebra", 50, true, false),
             test_branch("alpha", 10, true, false),
@@ -698,15 +784,18 @@ mod tests {
             .collect();
         assert_eq!(order_age, vec!["zebra", "alpha"]);
 
-        let mut app_name = App::new(branches, &BranchFilter::default(), "main", false);
-        app_name.cycle_sort(); // Age -> Name
-        let order_name: Vec<_> = app_name
+        // Cycle: Age -> Status -> Type -> LastCommit -> Branch
+        let mut app_branch = App::new(branches, &BranchFilter::default(), "main", false);
+        app_branch.sort_order = SortOrder::Branch;
+        app_branch.sort_ascending = SortOrder::Branch.default_ascending();
+        app_branch.update_visible();
+        let order_branch: Vec<_> = app_branch
             .visible
             .iter()
-            .map(|&i| app_name.all_branches[i].name.as_str())
+            .map(|&i| app_branch.all_branches[i].name.as_str())
             .collect();
-        assert_eq!(order_name, vec!["alpha", "zebra"]);
+        assert_eq!(order_branch, vec!["alpha", "zebra"]);
 
-        assert_ne!(order_age, order_name);
+        assert_ne!(order_age, order_branch);
     }
 }

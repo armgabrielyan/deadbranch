@@ -148,6 +148,7 @@ fn handle_browse_key(app: &mut App, key: KeyEvent) -> bool {
             app.mode = Mode::Filter;
         }
         KeyCode::Char('s') => app.cycle_sort(),
+        KeyCode::Char('S') => app.toggle_sort_direction(),
         KeyCode::Char('m') => app.toggle_merged_filter(),
         KeyCode::Char('l') => app.toggle_local_filter(),
         KeyCode::Char('R') => app.toggle_remote_filter(),
