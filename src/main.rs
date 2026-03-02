@@ -7,7 +7,6 @@ mod config;
 mod error;
 mod git;
 mod stats;
-#[allow(dead_code)]
 mod tui;
 mod ui;
 
@@ -174,6 +173,52 @@ fn cmd_clean(
         .clone()
         .unwrap_or_else(|| git::get_default_branch().unwrap_or_else(|_| "main".to_string()));
 
+    // List all branches
+    let spinner = ui::spinner("Loading branches...");
+    let all_branches = git::list_branches(&default_branch)?;
+    spinner.finish_and_clear();
+
+    if interactive {
+        // For TUI, apply only age + protection + exclusion filters.
+        // merged/local/remote become initial toggle state in the TUI.
+        let tui_filter = BranchFilter {
+            min_age_days: min_age,
+            local_only: false,
+            remote_only: false,
+            merged_only: false,
+            protected_branches: config.branches.protected.clone(),
+            exclude_patterns: config.branches.exclude_patterns.clone(),
+        };
+
+        let tui_branches: Vec<_> = all_branches
+            .into_iter()
+            .filter(|b| tui_filter.matches(b))
+            .collect();
+
+        if tui_branches.is_empty() {
+            ui::info("No branches to show in interactive mode.");
+            return Ok(());
+        }
+
+        // Build initial filter state from CLI flags for toggle seeding
+        let initial_filter = BranchFilter {
+            min_age_days: 0,
+            local_only,
+            remote_only,
+            merged_only: merged,
+            protected_branches: Vec::new(),
+            exclude_patterns: Vec::new(),
+        };
+
+        return tui::run_interactive(
+            tui_branches,
+            &initial_filter,
+            &config,
+            &default_branch,
+            force,
+        );
+    }
+
     // By default, only delete merged branches unless --force is used
     let merged_only = merged || !force;
 
@@ -188,11 +233,6 @@ fn cmd_clean(
         exclude_patterns: config.branches.exclude_patterns,
     };
 
-    // List all branches
-    let spinner = ui::spinner("Loading branches...");
-    let all_branches = git::list_branches(&default_branch)?;
-    spinner.finish_and_clear();
-
     // Filter branches
     let mut branches: Vec<_> = all_branches
         .into_iter()
@@ -204,11 +244,6 @@ fn cmd_clean(
 
     if branches.is_empty() {
         ui::info("No branches to delete.");
-        return Ok(());
-    }
-
-    if interactive {
-        ui::info("Interactive TUI mode coming soon.");
         return Ok(());
     }
 

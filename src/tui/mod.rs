@@ -1,5 +1,6 @@
 //! Interactive TUI mode for branch selection and deletion
 
+#[allow(dead_code)]
 mod app;
 
 use anyhow::Result;
