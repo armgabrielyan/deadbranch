@@ -210,13 +210,7 @@ fn cmd_clean(
             exclude_patterns: Vec::new(),
         };
 
-        return tui::run_interactive(
-            tui_branches,
-            &initial_filter,
-            &config,
-            &default_branch,
-            force,
-        );
+        return tui::run_interactive(tui_branches, &initial_filter, &default_branch, force);
     }
 
     // By default, only delete merged branches unless --force is used

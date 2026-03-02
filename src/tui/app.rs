@@ -1,5 +1,7 @@
 //! Core state management for the TUI
 
+use std::cell::Cell;
+
 use crate::branch::{Branch, BranchFilter};
 
 /// Current mode of the TUI
@@ -24,7 +26,7 @@ pub enum SortOrder {
     Age,
     /// Sort by name (alphabetical)
     Name,
-    /// Sort by merge status (unmerged first)
+    /// Sort by merge status (merged first)
     Status,
 }
 
@@ -98,7 +100,9 @@ pub struct App {
     /// Whether the help overlay is shown
     pub show_help: bool,
     /// Scroll offset for the branch list
-    pub scroll_offset: usize,
+    pub scroll_offset: Cell<usize>,
+    /// Branches remaining to be deleted (for incremental deletion)
+    pub pending_deletions: Vec<Branch>,
 }
 
 impl App {
@@ -132,7 +136,8 @@ impl App {
             backup_path: None,
             execution_done: false,
             show_help: false,
-            scroll_offset: 0,
+            scroll_offset: Cell::new(0),
+            pending_deletions: Vec::new(),
             all_branches,
         };
 
@@ -190,8 +195,8 @@ impl App {
             let ba = &branches[a];
             let bb = &branches[b];
 
-            // Always group: unmerged first, then merged
-            let merge_cmp = ba.is_merged.cmp(&bb.is_merged);
+            // Always group: merged first, then unmerged
+            let merge_cmp = bb.is_merged.cmp(&ba.is_merged);
             if merge_cmp != std::cmp::Ordering::Equal {
                 return merge_cmp;
             }
@@ -225,6 +230,7 @@ impl App {
     }
 
     /// Get the branch currently under the cursor, if any
+    #[allow(dead_code)]
     pub fn focused_branch(&self) -> Option<&Branch> {
         self.focused_index().map(|i| &self.all_branches[i])
     }
@@ -282,6 +288,7 @@ impl App {
     // ── Query methods ───────────────────────────────────────────────
 
     /// Get all selected branches
+    #[allow(dead_code)]
     pub fn selected_branches(&self) -> Vec<&Branch> {
         self.selected
             .iter()

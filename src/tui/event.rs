@@ -60,9 +60,28 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|frame| render::draw(frame, app))?;
 
-        // Run deletions on the first frame of Executing mode
-        if app.mode == Mode::Executing && app.deletion_results.is_empty() && !app.execution_done {
-            execute_deletions(app);
+        // Process one deletion per frame for live progress
+        if app.mode == Mode::Executing && !app.execution_done {
+            if app.pending_deletions.is_empty() && app.deletion_results.is_empty() {
+                // First frame: create backup and populate pending_deletions
+                prepare_deletions(app);
+            }
+            if let Some(branch) = app.pending_deletions.first().cloned() {
+                app.pending_deletions.remove(0);
+                let result = if branch.is_remote {
+                    crate::git::delete_remote_branch(&branch.name)
+                } else {
+                    crate::git::delete_local_branch(&branch.name, app.force)
+                };
+                app.deletion_results.push(DeletionResult {
+                    branch,
+                    success: result.is_ok(),
+                    error: result.err().map(|e| e.to_string()),
+                });
+            }
+            if app.pending_deletions.is_empty() {
+                app.execution_done = true;
+            }
         }
 
         // Transition from Executing to Summary when done
@@ -79,7 +98,7 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
                 }
 
                 match app.mode {
-                    Mode::Browse | Mode::Filter if app.mode == Mode::Browse => {
+                    Mode::Browse => {
                         if handle_browse_key(app, key) {
                             return Ok(());
                         }
@@ -97,7 +116,6 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
                         // Any key exits
                         return Ok(());
                     }
-                    _ => {}
                 }
             }
         }
@@ -194,8 +212,9 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent) -> bool {
     false
 }
 
-/// Execute branch deletions: create backup, delete local branches, then remote.
-fn execute_deletions(app: &mut App) {
+/// Prepare for incremental deletion: collect selected branches (local first,
+/// remote second), create a backup, and populate `pending_deletions`.
+fn prepare_deletions(app: &mut App) {
     // Collect selected branches
     let selected: Vec<Branch> = app
         .selected
@@ -217,28 +236,11 @@ fn execute_deletions(app: &mut App) {
         }
     }
 
-    // Delete local branches
-    for branch in &local {
-        let result = crate::git::delete_local_branch(&branch.name, app.force);
-        app.deletion_results.push(DeletionResult {
-            branch: branch.clone(),
-            success: result.is_ok(),
-            error: result.err().map(|e| e.to_string()),
-        });
-    }
-
-    // Delete remote branches
+    // Fetch and prune if any remote branches are selected
     if !remote.is_empty() {
         let _ = crate::git::fetch_and_prune();
-        for branch in &remote {
-            let result = crate::git::delete_remote_branch(&branch.name);
-            app.deletion_results.push(DeletionResult {
-                branch: branch.clone(),
-                success: result.is_ok(),
-                error: result.err().map(|e| e.to_string()),
-            });
-        }
     }
 
-    app.execution_done = true;
+    // Populate pending_deletions: local first, then remote
+    app.pending_deletions = local.into_iter().chain(remote).collect();
 }

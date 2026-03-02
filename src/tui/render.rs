@@ -28,6 +28,19 @@ const BLUE: Color = Color::Blue;
 const GRAY: Color = Color::DarkGray;
 const WHITE: Color = Color::White;
 
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/// Truncate a string to `max_len` characters, appending ".." if truncated.
+/// Uses char-level counting instead of byte slicing for UTF-8 safety.
+fn truncate_name(name: &str, max_len: usize) -> String {
+    if name.chars().count() > max_len {
+        let truncated: String = name.chars().take(max_len - 2).collect();
+        format!("{}..", truncated)
+    } else {
+        name.to_string()
+    }
+}
+
 // ── Main draw dispatch ──────────────────────────────────────────────
 
 /// Top-level draw function: dispatches to mode-specific renderers.
@@ -206,12 +219,8 @@ fn draw_branch_list(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(WHITE)
         };
 
-        // Truncate name to 30 chars
-        let display_name = if branch.name.len() > 30 {
-            format!("{}..", &branch.name[..28])
-        } else {
-            branch.name.clone()
-        };
+        // Truncate name to 30 chars (char-safe for UTF-8)
+        let display_name = truncate_name(&branch.name, 30);
         let name_span = Span::styled(format!(" {:<30}", display_name), name_style);
 
         let age_span = Span::styled(
@@ -270,9 +279,9 @@ fn compute_scroll_offset(
         .position(|(row_idx, _)| *row_idx == Some(app.cursor))
         .unwrap_or(0);
 
-    let current_offset = app.scroll_offset;
+    let current_offset = app.scroll_offset.get();
 
-    if cursor_line < current_offset {
+    let new_offset = if cursor_line < current_offset {
         // Cursor is above the visible area
         cursor_line
     } else if cursor_line >= current_offset + list_height {
@@ -280,7 +289,10 @@ fn compute_scroll_offset(
         cursor_line.saturating_sub(list_height - 1)
     } else {
         current_offset
-    }
+    };
+
+    app.scroll_offset.set(new_offset);
+    new_offset
 }
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -303,24 +315,39 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" clear  ", Style::default().fg(GRAY)),
         ])
     } else {
-        Line::from(vec![
-            Span::styled(" j/k", Style::default().fg(CYAN)),
-            Span::styled(" move  ", Style::default().fg(GRAY)),
-            Span::styled("Space", Style::default().fg(CYAN)),
-            Span::styled(" select  ", Style::default().fg(GRAY)),
-            Span::styled("a", Style::default().fg(CYAN)),
-            Span::styled(" merged  ", Style::default().fg(GRAY)),
-            Span::styled("d", Style::default().fg(CYAN)),
-            Span::styled(" delete  ", Style::default().fg(GRAY)),
-            Span::styled("/", Style::default().fg(CYAN)),
-            Span::styled(" filter  ", Style::default().fg(GRAY)),
-            Span::styled("s", Style::default().fg(CYAN)),
-            Span::styled(" sort  ", Style::default().fg(GRAY)),
-            Span::styled("?", Style::default().fg(CYAN)),
-            Span::styled(" help  ", Style::default().fg(GRAY)),
-            Span::styled("q", Style::default().fg(CYAN)),
-            Span::styled(" quit", Style::default().fg(GRAY)),
-        ])
+        {
+            let mut hints = vec![
+                Span::styled(" j/k", Style::default().fg(CYAN)),
+                Span::styled(" move  ", Style::default().fg(GRAY)),
+                Span::styled("Space", Style::default().fg(CYAN)),
+                Span::styled(" select  ", Style::default().fg(GRAY)),
+                Span::styled("a", Style::default().fg(CYAN)),
+                Span::styled(" merged  ", Style::default().fg(GRAY)),
+            ];
+            if app.force {
+                hints.push(Span::styled("A", Style::default().fg(CYAN)));
+                hints.push(Span::styled(" all  ", Style::default().fg(GRAY)));
+            } else {
+                hints.push(Span::styled("A", Style::default().fg(GRAY)));
+                hints.push(Span::styled(
+                    " (needs --force)  ",
+                    Style::default().fg(GRAY),
+                ));
+            }
+            hints.extend([
+                Span::styled("d", Style::default().fg(CYAN)),
+                Span::styled(" delete  ", Style::default().fg(GRAY)),
+                Span::styled("/", Style::default().fg(CYAN)),
+                Span::styled(" filter  ", Style::default().fg(GRAY)),
+                Span::styled("s", Style::default().fg(CYAN)),
+                Span::styled(" sort  ", Style::default().fg(GRAY)),
+                Span::styled("?", Style::default().fg(CYAN)),
+                Span::styled(" help  ", Style::default().fg(GRAY)),
+                Span::styled("q", Style::default().fg(CYAN)),
+                Span::styled(" quit", Style::default().fg(GRAY)),
+            ]);
+            Line::from(hints)
+        }
     };
     frame.render_widget(Paragraph::new(hints), lines_area[0]);
 
@@ -570,6 +597,10 @@ fn draw_summary(frame: &mut Frame, app: &App) {
     if successes > 0 {
         lines.push(Line::from(Span::styled(
             "  To restore:",
+            Style::default().fg(GRAY),
+        )));
+        lines.push(Line::from(Span::styled(
+            "    deadbranch backup list",
             Style::default().fg(GRAY),
         )));
         lines.push(Line::from(Span::styled(
