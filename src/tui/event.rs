@@ -13,7 +13,9 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use super::app::{App, Mode};
+use crate::branch::Branch;
+
+use super::app::{App, DeletionResult, Mode};
 use super::render;
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
@@ -57,6 +59,11 @@ pub fn run(app: &mut App) -> Result<()> {
 fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|frame| render::draw(frame, app))?;
+
+        // Run deletions on the first frame of Executing mode
+        if app.mode == Mode::Executing && app.deletion_results.is_empty() && !app.execution_done {
+            execute_deletions(app);
+        }
 
         // Transition from Executing to Summary when done
         if app.mode == Mode::Executing && app.execution_done {
@@ -185,4 +192,53 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent) -> bool {
     }
 
     false
+}
+
+/// Execute branch deletions: create backup, delete local branches, then remote.
+fn execute_deletions(app: &mut App) {
+    // Collect selected branches
+    let selected: Vec<Branch> = app
+        .selected
+        .iter()
+        .enumerate()
+        .filter(|(_, &s)| s)
+        .map(|(i, _)| app.all_branches[i].clone())
+        .collect();
+
+    let local: Vec<_> = selected.iter().filter(|b| !b.is_remote).cloned().collect();
+    let remote: Vec<_> = selected.iter().filter(|b| b.is_remote).cloned().collect();
+
+    // Create backup for all selected branches
+    let all_to_backup: Vec<_> = local.iter().chain(remote.iter()).cloned().collect();
+    if !all_to_backup.is_empty() {
+        match crate::create_backup_file(&all_to_backup) {
+            Ok(path) => app.backup_path = Some(path),
+            Err(e) => app.backup_path = Some(format!("backup failed: {}", e)),
+        }
+    }
+
+    // Delete local branches
+    for branch in &local {
+        let result = crate::git::delete_local_branch(&branch.name, app.force);
+        app.deletion_results.push(DeletionResult {
+            branch: branch.clone(),
+            success: result.is_ok(),
+            error: result.err().map(|e| e.to_string()),
+        });
+    }
+
+    // Delete remote branches
+    if !remote.is_empty() {
+        let _ = crate::git::fetch_and_prune();
+        for branch in &remote {
+            let result = crate::git::delete_remote_branch(&branch.name);
+            app.deletion_results.push(DeletionResult {
+                branch: branch.clone(),
+                success: result.is_ok(),
+                error: result.err().map(|e| e.to_string()),
+            });
+        }
+    }
+
+    app.execution_done = true;
 }

@@ -347,7 +347,7 @@ fn cmd_clean(
 }
 
 /// Delete local branches and create backup file
-fn delete_branches_with_backup(branches: &[branch::Branch], force: bool) -> Result<()> {
+pub(crate) fn delete_branches_with_backup(branches: &[branch::Branch], force: bool) -> Result<()> {
     let backup = create_backup_file(branches)?;
     let branch_word = ui::pluralize_branch(branches.len());
 
@@ -392,7 +392,7 @@ fn delete_branches_with_backup(branches: &[branch::Branch], force: bool) -> Resu
 }
 
 /// Delete remote branches and create backup file
-fn delete_remote_branches_with_backup(branches: &[branch::Branch]) -> Result<()> {
+pub(crate) fn delete_remote_branches_with_backup(branches: &[branch::Branch]) -> Result<()> {
     let backup = create_backup_file(branches)?;
     let branch_word = ui::pluralize_branch(branches.len());
 
@@ -438,7 +438,7 @@ fn delete_remote_branches_with_backup(branches: &[branch::Branch]) -> Result<()>
 
 /// Create a backup file with branch SHAs for potential restoration
 /// Saves to ~/.deadbranch/backups/<repo-name>/backup-<timestamp>.txt
-fn create_backup_file(branches: &[branch::Branch]) -> Result<String> {
+pub(crate) fn create_backup_file(branches: &[branch::Branch]) -> Result<String> {
     let repo_name = Config::get_repo_name();
     let backup_dir = Config::repo_backup_dir(&repo_name)?;
 
