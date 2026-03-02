@@ -1,6 +1,6 @@
 [package]
 name = "deadbranch"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 authors = ["Armen Gabrielyan"]
 description = "Clean up stale git branches safely"

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/armgabrielyan/deadbranch/compare/v0.1.3...v0.1.4) (2026-03-02)
+
+
+### Bug Fixes
+
+* exclude unnecessary artifacts from cargo package ([80fce87](https://github.com/armgabrielyan/deadbranch/commit/80fce879fd2a6be0efa413b49e9d4a16c363be70))
+
 ## [0.1.3](https://github.com/armgabrielyan/deadbranch/compare/v0.1.2...v0.1.3) (2026-03-02)
 
 
