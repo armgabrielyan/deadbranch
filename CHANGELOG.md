@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.3](https://github.com/armgabrielyan/deadbranch/compare/v0.1.2...v0.1.3) (2026-03-02)
+
+
+### Features
+
+* add man page generation and distribution ([c182dc6](https://github.com/armgabrielyan/deadbranch/commit/c182dc6ad9b164ba89a2260069bccbcadcbcb389))
+* add shell completions ([3da6175](https://github.com/armgabrielyan/deadbranch/commit/3da61752bb49cba8abdc524569605b2405b747f1))
+* add stats command with branch health summary and age distribution ([10fbc52](https://github.com/armgabrielyan/deadbranch/commit/10fbc523c5595ee55d91a707e77a2bb150e5a7f6))
+* replace unicode indicators with emoji ([455113f](https://github.com/armgabrielyan/deadbranch/commit/455113ff18ab5426a271eadb0bf681fc495ad484))
+
+
+### Bug Fixes
+
+* add #number to backup stats command table ([c5d931f](https://github.com/armgabrielyan/deadbranch/commit/c5d931f67eeaed80b000c3e50473891136581c09))
+
 ## [0.1.2](https://github.com/armgabrielyan/deadbranch/compare/v0.1.1...v0.1.2) (2026-02-07)
 
 
