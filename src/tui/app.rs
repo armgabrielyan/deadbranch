@@ -661,4 +661,45 @@ mod tests {
         assert_eq!(SortOrder::Name.label(), "Name");
         assert_eq!(SortOrder::Status.label(), "Status");
     }
+
+    #[test]
+    fn test_requires_strict_confirm_with_unmerged() {
+        let branches = vec![
+            test_branch("feature/old", 45, true, false),
+            test_branch("bugfix/stale", 60, false, false),
+        ];
+        let mut app = App::new(branches, &BranchFilter::default(), "main", true);
+        app.deselect_all();
+        app.selected[1] = true; // unmerged local
+        assert!(app.requires_strict_confirm());
+    }
+
+    #[test]
+    fn test_cycle_sort_changes_order() {
+        // zebra is older (50d), alpha is newer (10d)
+        // Age sort (oldest first) = zebra, alpha
+        // Name sort = alpha, zebra
+        let branches = vec![
+            test_branch("zebra", 50, true, false),
+            test_branch("alpha", 10, true, false),
+        ];
+        let app_age = App::new(branches.clone(), &BranchFilter::default(), "main", false);
+        let order_age: Vec<_> = app_age
+            .visible
+            .iter()
+            .map(|&i| app_age.all_branches[i].name.as_str())
+            .collect();
+        assert_eq!(order_age, vec!["zebra", "alpha"]);
+
+        let mut app_name = App::new(branches, &BranchFilter::default(), "main", false);
+        app_name.cycle_sort(); // Age -> Name
+        let order_name: Vec<_> = app_name
+            .visible
+            .iter()
+            .map(|&i| app_name.all_branches[i].name.as_str())
+            .collect();
+        assert_eq!(order_name, vec!["alpha", "zebra"]);
+
+        assert_ne!(order_age, order_name);
+    }
 }
