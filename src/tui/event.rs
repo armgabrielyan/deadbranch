@@ -144,6 +144,7 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
                                 return Ok(());
                             }
                         }
+                        Mode::VisualSelect => handle_visual_select_key(app, key),
                         Mode::Filter => handle_filter_key(app, key),
                         Mode::Confirm => {
                             if handle_confirm_key(app, key) {
@@ -230,6 +231,7 @@ fn handle_browse_key(app: &mut App, key: KeyEvent) -> bool {
         KeyCode::Char('A') => app.select_all(),
         KeyCode::Char('n') => app.deselect_all(),
         KeyCode::Char('i') => app.invert_selection(),
+        KeyCode::Char('V') => app.enter_visual_select(),
         KeyCode::Char('d') => {
             if app.selected_count() > 0 {
                 app.confirm_input.clear();
@@ -251,9 +253,56 @@ fn handle_browse_key(app: &mut App, key: KeyEvent) -> bool {
     false
 }
 
-/// Handle mouse events (scroll wheel in Browse mode).
+/// Handle key events in VisualSelect mode.
+fn handle_visual_select_key(app: &mut App, key: KeyEvent) {
+    // Handle pending 'g' for gg (jump to top)
+    if app.pending_g {
+        app.pending_g = false;
+        if key.code == KeyCode::Char('g') {
+            app.jump_to_top();
+            return;
+        }
+    }
+
+    // Ctrl-key bindings
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('d') => {
+                let half = app.table_visible_rows / 2;
+                app.page_down(half.max(1));
+                return;
+            }
+            KeyCode::Char('u') => {
+                let half = app.table_visible_rows / 2;
+                app.page_up(half.max(1));
+                return;
+            }
+            KeyCode::Char('f') => {
+                app.page_down(app.table_visible_rows.max(1));
+                return;
+            }
+            KeyCode::Char('b') => {
+                app.page_up(app.table_visible_rows.max(1));
+                return;
+            }
+            _ => {}
+        }
+    }
+
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => app.cursor_up(),
+        KeyCode::Down | KeyCode::Char('j') => app.cursor_down(),
+        KeyCode::Char('g') => app.pending_g = true,
+        KeyCode::Char('G') => app.jump_to_bottom(),
+        KeyCode::Char(' ') => app.apply_visual_selection(),
+        KeyCode::Esc => app.cancel_visual_select(),
+        _ => {}
+    }
+}
+
+/// Handle mouse events (scroll wheel in Browse and VisualSelect modes).
 fn handle_mouse(app: &mut App, mouse: MouseEvent) {
-    if app.mode != Mode::Browse {
+    if app.mode != Mode::Browse && app.mode != Mode::VisualSelect {
         return;
     }
     match mouse.kind {

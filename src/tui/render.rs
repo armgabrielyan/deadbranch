@@ -59,45 +59,40 @@ fn truncate_name(name: &str, max_len: usize) -> String {
     }
 }
 
-/// Build a styled Line for a branch name with search matches highlighted.
+/// Build a styled Line for a branch name with fuzzy match positions highlighted.
 ///
-/// Non-matching parts use `base_style`; matching parts get yellow bold on top.
-/// Case-insensitive. The name is truncated to `max_len` before highlighting.
-fn highlight_search<'a>(name: &str, query: &str, base_style: Style, max_len: usize) -> Line<'a> {
+/// Non-matching chars use `base_style`; matching chars get yellow bold.
+/// The name is truncated to `max_len` before highlighting.
+fn highlight_matches<'a>(
+    name: &str,
+    positions: &[usize],
+    base_style: Style,
+    max_len: usize,
+) -> Line<'a> {
     let display = truncate_name(name, max_len);
-    if query.is_empty() {
+    if positions.is_empty() {
         return Line::from(Span::styled(display, base_style));
     }
 
     let match_style = base_style.fg(YELLOW).add_modifier(Modifier::BOLD);
-    let lower = display.to_lowercase();
-    let query_lower = query.to_lowercase();
+    let display_len = display.chars().count();
     let mut spans: Vec<Span<'a>> = Vec::new();
-    let mut last_end = 0;
+    let chars: Vec<char> = display.chars().collect();
 
-    for (start, _) in lower.match_indices(&query_lower) {
-        if start > last_end {
-            spans.push(Span::styled(
-                display[last_end..start].to_string(),
-                base_style,
-            ));
+    // Walk chars, grouping consecutive match/non-match runs into spans
+    let mut i = 0;
+    while i < display_len {
+        let is_match = positions.contains(&i);
+        let start = i;
+        while i < display_len && positions.contains(&i) == is_match {
+            i += 1;
         }
-        spans.push(Span::styled(
-            display[start..start + query_lower.len()].to_string(),
-            match_style,
-        ));
-        last_end = start + query_lower.len();
+        let run: String = chars[start..i].iter().collect();
+        let style = if is_match { match_style } else { base_style };
+        spans.push(Span::styled(run, style));
     }
 
-    if last_end < display.len() {
-        spans.push(Span::styled(display[last_end..].to_string(), base_style));
-    }
-
-    if spans.is_empty() {
-        Line::from(Span::styled(display, base_style))
-    } else {
-        Line::from(spans)
-    }
+    Line::from(spans)
 }
 
 /// Compute a centered rectangle for dialog boxes.
@@ -130,7 +125,7 @@ fn draw_footer_hints(frame: &mut Frame, area: Rect, hints: Vec<(&str, &str)>) {
 /// Top-level draw function: dispatches to mode-specific renderers.
 pub fn draw(frame: &mut Frame, app: &mut App) {
     match app.mode {
-        Mode::Browse | Mode::Filter => draw_browse(frame, app),
+        Mode::Browse | Mode::Filter | Mode::VisualSelect => draw_browse(frame, app),
         Mode::Confirm => draw_confirm(frame, app),
         Mode::Executing => draw_executing(frame, app),
         Mode::Summary => draw_summary(frame, app),
@@ -265,8 +260,8 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
     for (row_idx, &branch_idx) in app.visible.iter().enumerate() {
         let branch = &app.all_branches[branch_idx];
 
-        // Section header when merge status changes
-        if last_was_merged != Some(branch.is_merged) {
+        // Section header when merge status changes (skip during search — relevance trumps grouping)
+        if app.search_query.is_empty() && last_was_merged != Some(branch.is_merged) {
             let (label, color) = if branch.is_merged {
                 ("MERGED (safe to delete)", GREEN)
             } else if app.force {
@@ -305,6 +300,12 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
         if row_idx == app.cursor {
             cursor_table_row = rows.len();
         }
+
+        // Detect if this row is inside a visual selection range
+        let in_visual_range = app.mode == Mode::VisualSelect && {
+            let (lo, hi) = app.visual_range();
+            row_idx >= lo && row_idx <= hi
+        };
 
         // Build the selector cell (cursor + checkbox)
         let is_focused = row_idx == app.cursor;
@@ -374,13 +375,14 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
 
         let date_str = branch.last_commit_date.format("%Y-%m-%d").to_string();
 
-        rows.push(Row::new(vec![
+        let match_positions = app.fuzzy_match_positions(&branch.name);
+        let mut row = Row::new(vec![
             Cell::from(selector),
             Cell::from(line_num).style(line_num_style),
             sep_cell(),
-            Cell::from(highlight_search(
+            Cell::from(highlight_matches(
                 &branch.name,
-                &app.search_query,
+                &match_positions,
                 name_style,
                 60,
             )),
@@ -392,7 +394,13 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
             sep_cell(),
             Cell::from(type_text).style(Style::default().fg(type_color)),
             Cell::from(date_str).style(Style::default().fg(GRAY)),
-        ]));
+        ]);
+
+        if in_visual_range {
+            row = row.style(Style::default().bg(Color::Indexed(236)));
+        }
+
+        rows.push(row);
     }
 
     // Column widths: data columns with thin separator columns between them
@@ -473,7 +481,21 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let lines_area = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(inner);
 
     // Line 1: keybinding hints
-    let hints = if app.mode == Mode::Filter {
+    let hints = if app.mode == Mode::VisualSelect {
+        Line::from(vec![
+            Span::styled(
+                " VISUAL",
+                Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ", Style::default().fg(GRAY)),
+            Span::styled("j/k", Style::default().fg(CYAN)),
+            Span::styled(" extend  ", Style::default().fg(GRAY)),
+            Span::styled("Space", Style::default().fg(CYAN)),
+            Span::styled(" toggle range  ", Style::default().fg(GRAY)),
+            Span::styled("Esc", Style::default().fg(CYAN)),
+            Span::styled(" cancel", Style::default().fg(GRAY)),
+        ])
+    } else if app.mode == Mode::Filter {
         Line::from(vec![
             Span::styled(" Enter", Style::default().fg(CYAN)),
             Span::styled(" apply  ", Style::default().fg(GRAY)),
@@ -928,7 +950,7 @@ fn draw_help_overlay(frame: &mut Frame) {
 
     // Center the overlay
     let width = 50.min(area.width.saturating_sub(4));
-    let height = 29.min(area.height.saturating_sub(4));
+    let height = 30.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let overlay_area = Rect::new(x, y, width, height);
@@ -961,6 +983,7 @@ fn draw_help_overlay(frame: &mut Frame) {
             Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
         )),
         help_line("Space", "Toggle selection"),
+        help_line("V", "Visual range select"),
         help_line("a", "Toggle all merged"),
         help_line("A", "Toggle all (force mode)"),
         help_line("n", "Deselect all"),
@@ -1011,15 +1034,16 @@ mod tests {
     }
 
     #[test]
-    fn highlight_empty_query_returns_single_span() {
-        let line = highlight_search("feature/foo", "", base(), 60);
+    fn highlight_no_positions_returns_single_span() {
+        let line = highlight_matches("feature/foo", &[], base(), 60);
         assert_eq!(line.spans.len(), 1);
         assert_eq!(line.spans[0].content, "feature/foo");
     }
 
     #[test]
-    fn highlight_substring_match() {
-        let line = highlight_search("feature/foo", "foo", base(), 60);
+    fn highlight_consecutive_positions() {
+        // Positions 8,9,10 = "foo" in "feature/foo"
+        let line = highlight_matches("feature/foo", &[8, 9, 10], base(), 60);
         assert_eq!(line.spans.len(), 2);
         assert_eq!(line.spans[0].content, "feature/");
         assert_eq!(line.spans[1].content, "foo");
@@ -1027,32 +1051,19 @@ mod tests {
     }
 
     #[test]
-    fn highlight_case_insensitive() {
-        let line = highlight_search("Feature/FOO", "foo", base(), 60);
-        assert_eq!(line.spans.len(), 2);
-        assert_eq!(line.spans[0].content, "Feature/");
-        assert_eq!(line.spans[1].content, "FOO");
-    }
-
-    #[test]
-    fn highlight_multiple_matches() {
-        let line = highlight_search("foo-bar-foo", "foo", base(), 60);
-        assert_eq!(line.spans.len(), 3);
-        assert_eq!(line.spans[0].content, "foo");
-        assert_eq!(line.spans[1].content, "-bar-");
-        assert_eq!(line.spans[2].content, "foo");
-    }
-
-    #[test]
-    fn highlight_no_match() {
-        let line = highlight_search("feature/bar", "xyz", base(), 60);
-        assert_eq!(line.spans.len(), 1);
-        assert_eq!(line.spans[0].content, "feature/bar");
+    fn highlight_scattered_positions() {
+        // "f_a_u_e" matching positions 0, 2, 4, 6 in "feature/"
+        let line = highlight_matches("feature/", &[0, 2, 4, 6], base(), 60);
+        // Should alternate: match(f), non(e), match(a), non(t), match(u), non(r), match(e), non(/)
+        assert!(line.spans.len() > 1);
+        // First span is "f" (matched)
+        assert_eq!(line.spans[0].content, "f");
+        assert!(line.spans[0].style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
     fn highlight_match_at_start() {
-        let line = highlight_search("foo-bar", "foo", base(), 60);
+        let line = highlight_matches("foo-bar", &[0, 1, 2], base(), 60);
         assert_eq!(line.spans.len(), 2);
         assert_eq!(line.spans[0].content, "foo");
         assert_eq!(line.spans[1].content, "-bar");
@@ -1060,10 +1071,17 @@ mod tests {
 
     #[test]
     fn highlight_match_at_end() {
-        let line = highlight_search("bar-foo", "foo", base(), 60);
+        let line = highlight_matches("bar-foo", &[4, 5, 6], base(), 60);
         assert_eq!(line.spans.len(), 2);
         assert_eq!(line.spans[0].content, "bar-");
         assert_eq!(line.spans[1].content, "foo");
+    }
+
+    #[test]
+    fn highlight_truncation() {
+        let line = highlight_matches("very-long-branch-name", &[0, 1], base(), 10);
+        // Should be truncated to 10 chars: "very-lon.."
+        assert!(line.spans.iter().map(|s| s.content.len()).sum::<usize>() <= 10);
     }
 
     #[test]

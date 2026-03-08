@@ -9,6 +9,8 @@ use crate::branch::{Branch, BranchFilter};
 pub enum Mode {
     /// Browsing and selecting branches
     Browse,
+    /// Visual range selection (like Vim's V)
+    VisualSelect,
     /// Typing a search/filter query
     Filter,
     /// Confirming deletion
@@ -126,6 +128,8 @@ pub struct App {
     pub pending_deletions: Vec<Branch>,
     /// Whether 'g' was pressed and we're waiting for the second 'g'
     pub pending_g: bool,
+    /// Cursor position when V was pressed (visual range anchor)
+    pub visual_anchor: usize,
     /// Number of branch rows visible in the table viewport (set during render)
     pub table_visible_rows: usize,
 }
@@ -165,6 +169,7 @@ impl App {
             table_state: TableState::default(),
             pending_deletions: Vec::new(),
             pending_g: false,
+            visual_anchor: 0,
             table_visible_rows: 0,
             all_branches,
         };
@@ -174,7 +179,9 @@ impl App {
     }
 
     /// Re-filter all_branches into visible indices based on current filter
-    /// toggles and search query, then sort.
+    /// toggles and search query, then sort. When a search query is active,
+    /// fuzzy matching is used and results are sorted by relevance instead of
+    /// the current column sort.
     pub fn update_visible(&mut self) {
         let filter = BranchFilter {
             min_age_days: 0,
@@ -185,25 +192,32 @@ impl App {
             exclude_patterns: Vec::new(),
         };
 
-        let query = self.search_query.to_lowercase();
+        let query = &self.search_query;
 
-        self.visible = self
-            .all_branches
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| {
-                if !filter.matches(b) {
-                    return false;
-                }
-                if !query.is_empty() && !b.name.to_lowercase().contains(&query) {
-                    return false;
-                }
-                true
-            })
-            .map(|(i, _)| i)
-            .collect();
-
-        self.sort_visible();
+        if query.is_empty() {
+            // No search: filter only, then sort by column
+            self.visible = self
+                .all_branches
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| filter.matches(b))
+                .map(|(i, _)| i)
+                .collect();
+            self.sort_visible();
+        } else {
+            // Fuzzy search: filter + score, sort by relevance (best first)
+            let mut scored: Vec<(usize, isize)> = self
+                .all_branches
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| filter.matches(b))
+                .filter_map(|(i, b)| {
+                    sublime_fuzzy::best_match(query, &b.name).map(|m| (i, m.score()))
+                })
+                .collect();
+            scored.sort_by(|a, b| b.1.cmp(&a.1));
+            self.visible = scored.into_iter().map(|(i, _)| i).collect();
+        }
 
         // Clamp cursor to valid range
         if self.visible.is_empty() {
@@ -489,6 +503,58 @@ impl App {
     /// Toggle the help overlay
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
+    }
+
+    // ── Visual Select ──────────────────────────────────────────────
+
+    /// Enter visual range select mode, anchoring at the current cursor
+    pub fn enter_visual_select(&mut self) {
+        self.visual_anchor = self.cursor;
+        self.mode = Mode::VisualSelect;
+    }
+
+    /// Get the ordered (min, max) range of the visual selection
+    pub fn visual_range(&self) -> (usize, usize) {
+        let a = self.visual_anchor;
+        let b = self.cursor;
+        (a.min(b), a.max(b))
+    }
+
+    /// Toggle selection for all branches in the visual range, then return to Browse
+    pub fn apply_visual_selection(&mut self) {
+        let (lo, hi) = self.visual_range();
+        for row in lo..=hi {
+            if let Some(&idx) = self.visible.get(row) {
+                if self.selected[idx] {
+                    self.selected[idx] = false;
+                } else {
+                    let branch = &self.all_branches[idx];
+                    if branch.is_merged || self.force {
+                        self.selected[idx] = true;
+                    }
+                }
+            }
+        }
+        self.mode = Mode::Browse;
+    }
+
+    /// Cancel visual select and return to Browse without changing selection
+    pub fn cancel_visual_select(&mut self) {
+        self.mode = Mode::Browse;
+    }
+
+    // ── Fuzzy search ───────────────────────────────────────────────
+
+    /// Get the matched character positions for a branch name against the
+    /// current search query. Returns an empty vec when there is no query
+    /// or no match.
+    pub fn fuzzy_match_positions(&self, branch_name: &str) -> Vec<usize> {
+        if self.search_query.is_empty() {
+            return Vec::new();
+        }
+        sublime_fuzzy::best_match(&self.search_query, branch_name)
+            .map(|m| m.matched_indices().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
@@ -990,5 +1056,168 @@ mod tests {
         let mut app = App::new(Vec::new(), &default_filter(), "main", false);
         app.page_up(5);
         assert_eq!(app.cursor, 0);
+    }
+
+    // ── Visual Select tests ────────────────────────────────────────
+
+    #[test]
+    fn test_visual_range_anchor_below_cursor() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.cursor = 3;
+        app.enter_visual_select();
+        app.cursor = 1; // move cursor above anchor
+        let (lo, hi) = app.visual_range();
+        assert_eq!(lo, 1);
+        assert_eq!(hi, 3);
+    }
+
+    #[test]
+    fn test_visual_range_anchor_above_cursor() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.cursor = 1;
+        app.enter_visual_select();
+        app.cursor = 3;
+        let (lo, hi) = app.visual_range();
+        assert_eq!(lo, 1);
+        assert_eq!(hi, 3);
+    }
+
+    #[test]
+    fn test_visual_range_single_row() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.cursor = 2;
+        app.enter_visual_select();
+        let (lo, hi) = app.visual_range();
+        assert_eq!(lo, 2);
+        assert_eq!(hi, 2);
+    }
+
+    #[test]
+    fn test_apply_visual_selection_toggles_range() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.deselect_all();
+
+        // Visual select rows 0..=2
+        app.cursor = 0;
+        app.enter_visual_select();
+        app.cursor = 2;
+        app.apply_visual_selection();
+
+        // Should have toggled on the merged branches in the range
+        assert_eq!(app.mode, Mode::Browse);
+        let selected_count: usize = (0..=2)
+            .filter_map(|row| app.visible.get(row).copied())
+            .filter(|&idx| app.selected[idx])
+            .count();
+        assert!(selected_count > 0);
+    }
+
+    #[test]
+    fn test_apply_visual_selection_respects_force() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.deselect_all();
+
+        // Select all rows
+        app.cursor = 0;
+        app.enter_visual_select();
+        app.cursor = app.visible.len() - 1;
+        app.apply_visual_selection();
+
+        // Without force, unmerged branches should remain unselected
+        for &idx in &app.visible {
+            if !app.all_branches[idx].is_merged {
+                assert!(!app.selected[idx]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_apply_visual_selection_with_force() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", true);
+        app.deselect_all();
+
+        app.cursor = 0;
+        app.enter_visual_select();
+        app.cursor = app.visible.len() - 1;
+        app.apply_visual_selection();
+
+        // With force, all branches in range should be selected
+        for &idx in &app.visible {
+            assert!(app.selected[idx]);
+        }
+    }
+
+    #[test]
+    fn test_cancel_visual_select_preserves_selection() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        let before: Vec<bool> = app.selected.clone();
+
+        app.enter_visual_select();
+        app.cursor_down();
+        app.cancel_visual_select();
+
+        assert_eq!(app.mode, Mode::Browse);
+        assert_eq!(app.selected, before);
+    }
+
+    // ── Fuzzy search tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_fuzzy_search_filters_branches() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.search_query = "remote".to_string();
+        app.update_visible();
+        assert!(!app.visible.is_empty());
+        // The remote branch should match
+        assert!(app.all_branches[app.visible[0]].name.contains("remote"));
+    }
+
+    #[test]
+    fn test_fuzzy_search_partial_match() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        // "featold" should fuzzy-match "feature/old-merged" and "feature/old-unmerged"
+        app.search_query = "featold".to_string();
+        app.update_visible();
+        assert!(!app.visible.is_empty());
+        for &idx in &app.visible {
+            assert!(app.all_branches[idx].name.contains("old"));
+        }
+    }
+
+    #[test]
+    fn test_fuzzy_match_positions_empty_query() {
+        let app = App::new(sample_branches(), &default_filter(), "main", false);
+        assert!(app.fuzzy_match_positions("feature/foo").is_empty());
+    }
+
+    #[test]
+    fn test_fuzzy_match_positions_with_query() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.search_query = "foo".to_string();
+        let positions = app.fuzzy_match_positions("feature/foo");
+        assert!(!positions.is_empty());
+    }
+
+    #[test]
+    fn test_fuzzy_search_sorts_by_relevance() {
+        let branches = vec![
+            test_branch("fix/unrelated-thing", 10, true, false),
+            test_branch("feature/auth-refactor", 20, true, false),
+            test_branch("auth-fix", 15, true, false),
+        ];
+        let mut app = App::new(branches, &default_filter(), "main", false);
+        app.search_query = "auth".to_string();
+        app.update_visible();
+
+        // Both "auth" branches should match; "unrelated" should be excluded
+        let names: Vec<&str> = app
+            .visible
+            .iter()
+            .map(|&i| app.all_branches[i].name.as_str())
+            .collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"auth-fix"));
+        assert!(names.contains(&"feature/auth-refactor"));
+        assert!(!names.contains(&"fix/unrelated-thing"));
     }
 }
