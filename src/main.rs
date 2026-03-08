@@ -378,7 +378,8 @@ pub(crate) fn delete_branches_with_backup(branches: &[branch::Branch], force: bo
     Ok(())
 }
 
-/// Delete remote branches and create backup file
+/// Delete remote branches and create backup file.
+/// Uses batch `git push origin --delete` for a single network round-trip.
 pub(crate) fn delete_remote_branches_with_backup(branches: &[branch::Branch]) -> Result<()> {
     let backup = create_backup_file(branches)?;
     let branch_word = ui::pluralize_branch(branches.len());
@@ -387,19 +388,20 @@ pub(crate) fn delete_remote_branches_with_backup(branches: &[branch::Branch]) ->
     println!();
     println!("Deleting remote {}...", branch_word);
 
+    let names: Vec<String> = branches.iter().map(|b| b.name.clone()).collect();
+    let results = git::delete_remote_branches_batch(&names)?;
+
     let mut deleted = 0;
     let mut failed = 0;
 
-    for branch in branches {
-        match git::delete_remote_branch(&branch.name) {
-            Ok(()) => {
-                println!("  {} {}", console::style("✅").green(), branch.name);
-                deleted += 1;
-            }
-            Err(e) => {
-                println!("  {} {} ({})", console::style("❌").red(), branch.name, e);
-                failed += 1;
-            }
+    for (name, success, error) in &results {
+        if *success {
+            println!("  {} {}", console::style("✅").green(), name);
+            deleted += 1;
+        } else {
+            let err_msg = error.as_deref().unwrap_or("unknown error");
+            println!("  {} {} ({})", console::style("❌").red(), name, err_msg);
+            failed += 1;
         }
     }
 

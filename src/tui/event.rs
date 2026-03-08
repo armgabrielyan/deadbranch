@@ -63,24 +63,53 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|frame| render::draw(frame, app))?;
 
-        // Process one deletion per frame for live progress
+        // Process deletions: local one-per-frame, remote batched in one push
         if app.mode == Mode::Executing && !app.execution_done {
             if app.pending_deletions.is_empty() && app.deletion_results.is_empty() {
                 // First frame: create backup and populate pending_deletions
                 prepare_deletions(app);
             }
             if let Some(branch) = app.pending_deletions.first().cloned() {
-                app.pending_deletions.remove(0);
-                let result = if branch.is_remote {
-                    crate::git::delete_remote_branch(&branch.name)
+                if branch.is_remote {
+                    // All remaining are remote (locals are processed first).
+                    // Batch delete in a single git push for one network round-trip.
+                    let remote_branches: Vec<Branch> = app.pending_deletions.drain(..).collect();
+                    let names: Vec<String> =
+                        remote_branches.iter().map(|b| b.name.clone()).collect();
+
+                    match crate::git::delete_remote_branches_batch(&names) {
+                        Ok(results) => {
+                            for ((_, success, error), branch) in
+                                results.into_iter().zip(remote_branches)
+                            {
+                                app.deletion_results.push(DeletionResult {
+                                    branch,
+                                    success,
+                                    error,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            let err_msg = e.to_string();
+                            for branch in remote_branches {
+                                app.deletion_results.push(DeletionResult {
+                                    branch,
+                                    success: false,
+                                    error: Some(err_msg.clone()),
+                                });
+                            }
+                        }
+                    }
                 } else {
-                    crate::git::delete_local_branch(&branch.name, app.force)
-                };
-                app.deletion_results.push(DeletionResult {
-                    branch,
-                    success: result.is_ok(),
-                    error: result.err().map(|e| e.to_string()),
-                });
+                    // Local: delete one per frame for progressive UI
+                    app.pending_deletions.remove(0);
+                    let result = crate::git::delete_local_branch(&branch.name, app.force);
+                    app.deletion_results.push(DeletionResult {
+                        branch,
+                        success: result.is_ok(),
+                        error: result.err().map(|e| e.to_string()),
+                    });
+                }
             }
             if app.pending_deletions.is_empty() {
                 app.execution_done = true;

@@ -259,22 +259,81 @@ pub fn delete_local_branch(branch: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// Delete a remote branch
-pub fn delete_remote_branch(branch: &str) -> Result<()> {
-    // Extract the branch name without origin/ prefix
-    let branch_name = branch.strip_prefix("origin/").unwrap_or(branch);
-
-    let output = Command::new("git")
-        .args(["push", "origin", "--delete", branch_name])
-        .output()
-        .context("Failed to delete remote branch")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to delete remote branch '{}': {}", branch, stderr);
+/// Batch delete remote branches in a single `git push` command.
+///
+/// Returns a Vec of `(branch_name, success, optional_error)` in the same
+/// order as the input. Uses one network round-trip instead of N.
+pub fn delete_remote_branches_batch(
+    branches: &[String],
+) -> Result<Vec<(String, bool, Option<String>)>> {
+    if branches.is_empty() {
+        return Ok(Vec::new());
     }
 
-    Ok(())
+    let names: Vec<&str> = branches
+        .iter()
+        .map(|b| b.strip_prefix("origin/").unwrap_or(b.as_str()))
+        .collect();
+
+    let mut args = vec!["push", "origin", "--delete"];
+    args.extend(&names);
+
+    let output = Command::new("git")
+        .args(&args)
+        .output()
+        .context("Failed to run git push --delete")?;
+
+    // All succeeded
+    if output.status.success() {
+        return Ok(branches.iter().map(|b| (b.clone(), true, None)).collect());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Ok(parse_batch_delete_stderr(&stderr, branches, &names))
+}
+
+/// Parse `git push --delete` stderr to determine per-branch success/failure.
+///
+/// `branches` are the original names (e.g. `origin/feat/x`), `names` are the
+/// stripped refspec names passed to git (e.g. `feat/x`).
+fn parse_batch_delete_stderr(
+    stderr: &str,
+    branches: &[String],
+    names: &[&str],
+) -> Vec<(String, bool, Option<String>)> {
+    // Connection-level failure: no branches were deleted
+    if stderr.contains("Could not resolve host")
+        || stderr.contains("unable to access")
+        || stderr.contains("Connection refused")
+        || stderr.contains("fatal: the remote end hung up")
+    {
+        let err = stderr.trim().to_string();
+        return branches
+            .iter()
+            .map(|b| (b.clone(), false, Some(err.clone())))
+            .collect();
+    }
+
+    // Partial failure: determine per-branch status from stderr.
+    // Git reports failures as: error: unable to delete '<name>': ...
+    // Branches not mentioned in error lines were deleted successfully.
+    branches
+        .iter()
+        .zip(names.iter())
+        .map(|(branch, &name)| {
+            if stderr.contains(&format!("unable to delete '{}'", name)) {
+                let err = stderr
+                    .lines()
+                    .find(|l| l.contains(name) && l.starts_with("error"))
+                    .unwrap_or("remote ref does not exist")
+                    .trim()
+                    .to_string();
+                (branch.clone(), false, Some(err))
+            } else {
+                (branch.clone(), true, None)
+            }
+        })
+        .collect()
 }
 
 /// Get the SHA for a branch (for backup purposes)
@@ -363,5 +422,123 @@ mod tests {
         assert!(merged.contains("feature/auth"));
         // Remote branch lookup (as used by list_remote_branches)
         assert!(merged.contains("origin/feature/auth"));
+    }
+
+    // ── Batch delete stderr parsing ────────────────────────────────
+
+    #[test]
+    fn batch_delete_empty_input() {
+        let results = parse_batch_delete_stderr("", &[], &[]);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn batch_delete_all_succeed() {
+        // When stderr has no error markers, all branches are considered successful
+        let stderr = "To github.com:user/repo.git\n - [deleted]         feat/a\n - [deleted]         feat/b\n";
+        let branches = vec!["origin/feat/a".to_string(), "origin/feat/b".to_string()];
+        let names = vec!["feat/a", "feat/b"];
+
+        let results = parse_batch_delete_stderr(stderr, &branches, &names);
+        assert_eq!(results.len(), 2);
+        assert!(results[0].1); // success
+        assert!(results[0].2.is_none());
+        assert!(results[1].1);
+        assert!(results[1].2.is_none());
+    }
+
+    #[test]
+    fn batch_delete_partial_failure() {
+        let stderr = "\
+error: unable to delete 'feat/gone': remote ref does not exist
+To github.com:user/repo.git
+ - [deleted]         feat/ok
+ ! [remote rejected] feat/gone (remote ref does not exist)
+error: failed to push some refs to 'github.com:user/repo.git'
+";
+        let branches = vec!["origin/feat/ok".to_string(), "origin/feat/gone".to_string()];
+        let names = vec!["feat/ok", "feat/gone"];
+
+        let results = parse_batch_delete_stderr(stderr, &branches, &names);
+        assert_eq!(results.len(), 2);
+
+        // feat/ok succeeded (not mentioned in error lines)
+        assert!(results[0].1);
+        assert!(results[0].2.is_none());
+
+        // feat/gone failed
+        assert!(!results[1].1);
+        assert!(results[1].2.as_ref().unwrap().contains("unable to delete"));
+    }
+
+    #[test]
+    fn batch_delete_connection_failure() {
+        let stderr = "fatal: unable to access 'https://github.com/user/repo.git/': Could not resolve host: github.com\n";
+        let branches = vec!["origin/feat/a".to_string(), "origin/feat/b".to_string()];
+        let names = vec!["feat/a", "feat/b"];
+
+        let results = parse_batch_delete_stderr(stderr, &branches, &names);
+        assert_eq!(results.len(), 2);
+
+        // All fail with same connection error
+        for (_, success, error) in &results {
+            assert!(!success);
+            assert!(error.as_ref().unwrap().contains("Could not resolve host"));
+        }
+    }
+
+    #[test]
+    fn batch_delete_connection_refused() {
+        let stderr = "fatal: Connection refused\n";
+        let branches = vec!["origin/feat/x".to_string()];
+        let names = vec!["feat/x"];
+
+        let results = parse_batch_delete_stderr(stderr, &branches, &names);
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].1);
+        assert!(results[0]
+            .2
+            .as_ref()
+            .unwrap()
+            .contains("Connection refused"));
+    }
+
+    #[test]
+    fn batch_delete_strips_origin_prefix() {
+        // Verify the function works with names that already had origin/ stripped
+        let stderr = "error: unable to delete 'cleanup/old': remote ref does not exist\n";
+        let branches = vec![
+            "origin/feat/new".to_string(),
+            "origin/cleanup/old".to_string(),
+        ];
+        let names = vec!["feat/new", "cleanup/old"];
+
+        let results = parse_batch_delete_stderr(stderr, &branches, &names);
+        assert!(results[0].1); // feat/new OK
+        assert!(!results[1].1); // cleanup/old failed
+        assert_eq!(results[0].0, "origin/feat/new");
+        assert_eq!(results[1].0, "origin/cleanup/old");
+    }
+
+    #[test]
+    fn batch_delete_multiple_failures() {
+        let stderr = "\
+error: unable to delete 'feat/a': remote ref does not exist
+error: unable to delete 'feat/c': remote ref does not exist
+To github.com:user/repo.git
+ - [deleted]         feat/b
+error: failed to push some refs to 'github.com:user/repo.git'
+";
+        let branches = vec![
+            "origin/feat/a".to_string(),
+            "origin/feat/b".to_string(),
+            "origin/feat/c".to_string(),
+        ];
+        let names = vec!["feat/a", "feat/b", "feat/c"];
+
+        let results = parse_batch_delete_stderr(stderr, &branches, &names);
+        assert!(!results[0].1); // feat/a failed
+        assert!(results[1].1); // feat/b succeeded
+        assert!(!results[2].1); // feat/c failed
     }
 }
