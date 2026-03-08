@@ -455,35 +455,31 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_confirm(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    // Gather selected branches grouped by merge status
-    let mut safe: Vec<&crate::branch::Branch> = Vec::new();
-    let mut dangerous: Vec<&crate::branch::Branch> = Vec::new();
+    // Count selected branches by category
+    let mut merged = 0usize;
+    let mut unmerged = 0usize;
+    let mut local = 0usize;
+    let mut remote = 0usize;
     for (i, &sel) in app.selected.iter().enumerate() {
         if sel {
-            let branch = &app.all_branches[i];
-            if branch.is_merged {
-                safe.push(branch);
+            let b = &app.all_branches[i];
+            if b.is_merged {
+                merged += 1;
             } else {
-                dangerous.push(branch);
+                unmerged += 1;
+            }
+            if b.is_remote {
+                remote += 1;
+            } else {
+                local += 1;
             }
         }
     }
+    let total = merged + unmerged;
+    let has_risk = remote > 0 || unmerged > 0;
 
-    // Compute content height for centering
-    let safe_lines = if safe.is_empty() {
-        0
-    } else {
-        safe.len() as u16 + 2
-    }; // header + items + blank
-    let danger_lines = if dangerous.is_empty() {
-        0
-    } else {
-        dangerous.len() as u16 + 2
-    };
-    let content_height = safe_lines
-        + danger_lines
-        + 5 // separator + summary + backup + blank + prompt
-        + 1; // footer hints
+    // Fixed compact dialog height
+    let content_height = if has_risk { 12 } else { 10 };
 
     let dialog = centered_dialog(area, content_height);
     frame.render_widget(Clear, dialog);
@@ -495,111 +491,130 @@ fn draw_confirm(frame: &mut Frame, app: &App) {
     let inner = block.inner(dialog);
     frame.render_widget(block, dialog);
 
-    // Split inner into content area + footer hint line
     let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
     let content_area = chunks[0];
     let footer_area = chunks[1];
 
     let mut lines: Vec<Line> = Vec::new();
 
-    // Safe section
-    if !safe.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("  {} Safe to delete ({}):", CHECK, safe.len()),
-            Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-        )));
-        for branch in &safe {
-            let type_label = if branch.is_remote { "remote" } else { "local" };
-            let sha_short = if branch.last_commit_sha.len() >= 7 {
-                &branch.last_commit_sha[..7]
-            } else {
-                &branch.last_commit_sha
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!("    {} ", CHECK), Style::default().fg(GREEN)),
-                Span::styled(&branch.name, Style::default().fg(WHITE)),
-                Span::styled(
-                    format!("  {}  {}d  {}", type_label, branch.age_days, sha_short),
-                    Style::default().fg(GRAY),
-                ),
-            ]));
-        }
-        lines.push(Line::from(""));
-    }
-
-    // Dangerous section
-    if !dangerous.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("  {} Unmerged branches ({}):", WARN, dangerous.len()),
-            Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
-        )));
-        for branch in &dangerous {
-            let type_label = if branch.is_remote { "remote" } else { "local" };
-            let sha_short = if branch.last_commit_sha.len() >= 7 {
-                &branch.last_commit_sha[..7]
-            } else {
-                &branch.last_commit_sha
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!("    {} ", CROSS), Style::default().fg(RED)),
-                Span::styled(&branch.name, Style::default().fg(YELLOW)),
-                Span::styled(
-                    format!("  {}  {}d  {}", type_label, branch.age_days, sha_short),
-                    Style::default().fg(GRAY),
-                ),
-            ]));
-        }
-        lines.push(Line::from(""));
-    }
-
-    // Horizontal separator
-    let sep_width = inner.width.saturating_sub(4) as usize;
-    lines.push(Line::from(Span::styled(
-        format!("  {}", "\u{2500}".repeat(sep_width)),
-        Style::default().fg(GRAY),
-    )));
-
-    // Summary line
-    let total = safe.len() + dangerous.len();
-    let remote_count: usize = safe
-        .iter()
-        .chain(dangerous.iter())
-        .filter(|b| b.is_remote)
-        .count();
-    let mut summary_parts = vec![format!("{} branches", total)];
-    if remote_count > 0 {
-        summary_parts.push(format!("{} remote", remote_count));
-    }
-    summary_parts.push("backup auto-created".to_string());
-    lines.push(Line::from(Span::styled(
-        format!("  {} {}", DOT, summary_parts.join(" {} ")),
-        Style::default().fg(GRAY),
-    )));
+    // Hero count
+    lines.push(Line::from(""));
+    lines.push(
+        Line::from(Span::styled(
+            format!(
+                "{} branch{} selected",
+                total,
+                if total == 1 { "" } else { "es" }
+            ),
+            Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center),
+    );
     lines.push(Line::from(""));
 
-    // Confirmation prompt
+    // Breakdown line: merged/unmerged · local/remote
+    let mut parts: Vec<Span> = Vec::new();
+    if merged > 0 {
+        parts.push(Span::styled(
+            format!("{} merged", merged),
+            Style::default().fg(GREEN),
+        ));
+    }
+    if unmerged > 0 {
+        if !parts.is_empty() {
+            parts.push(Span::styled(
+                format!("  {}  ", DOT),
+                Style::default().fg(GRAY),
+            ));
+        }
+        parts.push(Span::styled(
+            format!("{} unmerged", unmerged),
+            Style::default().fg(YELLOW),
+        ));
+    }
+    parts.push(Span::styled(
+        format!("  {}  ", DOT),
+        Style::default().fg(GRAY),
+    ));
+    if local > 0 {
+        parts.push(Span::styled(
+            format!("{} local", local),
+            Style::default().fg(CYAN),
+        ));
+    }
+    if remote > 0 {
+        if local > 0 {
+            parts.push(Span::styled(
+                format!("  {}  ", DOT),
+                Style::default().fg(GRAY),
+            ));
+        }
+        parts.push(Span::styled(
+            format!("{} remote", remote),
+            Style::default().fg(BLUE),
+        ));
+    }
+    lines.push(Line::from(parts).alignment(Alignment::Center));
+    lines.push(Line::from(""));
+
+    // Separator with inline backup note
+    let label = format!(" {} backup auto-created ", CHECK);
+    let label_len = label.chars().count();
+    let avail = inner.width.saturating_sub(4) as usize;
+    let side = avail.saturating_sub(label_len) / 2;
+    let hr = "\u{2500}";
+    lines.push(
+        Line::from(vec![
+            Span::styled(hr.repeat(side), Style::default().fg(GRAY)),
+            Span::styled(label, Style::default().fg(GRAY)),
+            Span::styled(hr.repeat(side), Style::default().fg(GRAY)),
+        ])
+        .alignment(Alignment::Center),
+    );
+    lines.push(Line::from(""));
+
+    // Warning callout (only when risky)
+    if has_risk {
+        let mut warn_parts = vec![Span::styled(
+            format!("{}  ", WARN),
+            Style::default().fg(YELLOW),
+        )];
+        let mut reasons = Vec::new();
+        if unmerged > 0 {
+            reasons.push("unmerged");
+        }
+        if remote > 0 {
+            reasons.push("remote");
+        }
+        warn_parts.push(Span::styled(
+            format!("Includes {} branches", reasons.join(" & ")),
+            Style::default().fg(YELLOW),
+        ));
+        lines.push(Line::from(warn_parts).alignment(Alignment::Center));
+        lines.push(Line::from(""));
+    }
+
+    // Input field (only for strict confirm — simple confirm uses footer only)
     if app.requires_strict_confirm() {
-        lines.push(Line::from(vec![
-            Span::styled("  Type 'yes' to confirm: ", Style::default().fg(YELLOW)),
-            Span::styled(&app.confirm_input, Style::default().fg(WHITE)),
-            Span::styled(BLOCK, Style::default().fg(YELLOW)),
-        ]));
-    } else {
-        lines.push(Line::from(Span::styled(
-            "  Press Enter or y to confirm",
-            Style::default().fg(GRAY),
-        )));
+        lines.push(
+            Line::from(vec![
+                Span::styled("> ", Style::default().fg(GRAY)),
+                Span::styled(&app.confirm_input, Style::default().fg(WHITE)),
+                Span::styled(BLOCK, Style::default().fg(WHITE)),
+            ])
+            .alignment(Alignment::Center),
+        );
     }
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, content_area);
 
-    // Footer hints
-    draw_footer_hints(
-        frame,
-        footer_area,
-        vec![("Enter/y", "confirm"), ("Esc", "back")],
-    );
+    let hints = if app.requires_strict_confirm() {
+        vec![("Type 'yes' + Enter", "confirm"), ("Esc", "back")]
+    } else {
+        vec![("Enter/y", "confirm"), ("Esc", "back")]
+    };
+    draw_footer_hints(frame, footer_area, hints);
 }
 
 // ── Executing mode ──────────────────────────────────────────────────
@@ -698,9 +713,9 @@ fn draw_summary(frame: &mut Frame, app: &App) {
     let failures = app.deletion_results.iter().filter(|r| !r.success).count();
 
     // Compute content height
-    let failure_lines: u16 = if failures > 0 { failures as u16 + 2 } else { 0 }; // header + items + blank
-    let restore_lines: u16 = if successes > 0 { 3 } else { 0 }; // header + command + blank
-    let content_height = 3 + failure_lines + restore_lines + 1; // hero + blank + separator + footer
+    let failure_lines: u16 = if failures > 0 { failures as u16 + 2 } else { 0 };
+    let restore_lines: u16 = if successes > 0 { 2 } else { 0 };
+    let content_height = 3 + failure_lines + restore_lines + 1;
 
     let dialog = centered_dialog(area, content_height);
     frame.render_widget(Clear, dialog);
@@ -779,16 +794,21 @@ fn draw_summary(frame: &mut Frame, app: &App) {
         lines.push(Line::from(""));
     }
 
-    // Restore info
+    // Restore hint — inline with separator, same pattern as confirm dialog
     if successes > 0 {
-        lines.push(Line::from(Span::styled(
-            "  Restore:",
-            Style::default().fg(GRAY),
-        )));
-        lines.push(Line::from(Span::styled(
-            "    deadbranch backup restore <branch-name>",
-            Style::default().fg(GRAY),
-        )));
+        let label = " deadbranch backup restore <name> ";
+        let label_len = label.chars().count();
+        let avail = inner.width.saturating_sub(4) as usize;
+        let side = avail.saturating_sub(label_len) / 2;
+        let hr = "\u{2500}";
+        lines.push(
+            Line::from(vec![
+                Span::styled(hr.repeat(side), Style::default().fg(GRAY)),
+                Span::styled(label, Style::default().fg(GRAY)),
+                Span::styled(hr.repeat(side), Style::default().fg(GRAY)),
+            ])
+            .alignment(Alignment::Center),
+        );
         lines.push(Line::from(""));
     }
 
@@ -796,7 +816,11 @@ fn draw_summary(frame: &mut Frame, app: &App) {
     frame.render_widget(paragraph, content_area);
 
     // Footer
-    draw_footer_hints(frame, footer_area, vec![("any key", "exit")]);
+    draw_footer_hints(
+        frame,
+        footer_area,
+        vec![("Esc", "back"), ("any key", "exit")],
+    );
 }
 
 // ── Help overlay ────────────────────────────────────────────────────

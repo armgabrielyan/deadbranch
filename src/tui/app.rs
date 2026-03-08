@@ -369,6 +369,45 @@ impl App {
         })
     }
 
+    /// Remove successfully deleted branches from the branch list and reset
+    /// deletion state so the user can return to a clean browse view.
+    pub fn apply_deletions_and_reset(&mut self) {
+        // Collect names of successfully deleted branches
+        let deleted: std::collections::HashSet<String> = self
+            .deletion_results
+            .iter()
+            .filter(|r| r.success)
+            .map(|r| r.branch.name.clone())
+            .collect();
+
+        if !deleted.is_empty() {
+            // Rebuild all_branches and selected, removing deleted ones
+            let mut new_branches = Vec::new();
+            let mut new_selected = Vec::new();
+            for (i, branch) in self.all_branches.iter().enumerate() {
+                if !deleted.contains(&branch.name) {
+                    new_branches.push(branch.clone());
+                    new_selected.push(self.selected[i]);
+                }
+            }
+            self.all_branches = new_branches;
+            self.selected = new_selected;
+        }
+
+        // Reset deletion state
+        self.deletion_results.clear();
+        self.pending_deletions.clear();
+        self.backup_path = None;
+        self.execution_done = false;
+        self.confirm_input.clear();
+
+        // Refresh visible list and fix cursor
+        self.update_visible();
+        if self.cursor >= self.visible.len() {
+            self.cursor = self.visible.len().saturating_sub(1);
+        }
+    }
+
     // ── Filter methods ──────────────────────────────────────────────
 
     /// Cycle to the next sort order and re-sort

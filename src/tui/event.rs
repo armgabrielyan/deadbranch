@@ -113,8 +113,12 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
                         // No input during execution
                     }
                     Mode::Summary => {
-                        // Any key exits
-                        return Ok(());
+                        if key.code == KeyCode::Esc {
+                            app.apply_deletions_and_reset();
+                            app.mode = Mode::Browse;
+                        } else {
+                            return Ok(());
+                        }
                     }
                 }
             }
