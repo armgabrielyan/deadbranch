@@ -266,23 +266,16 @@ fn cmd_clean(
             ui::display_branches(&remote_branches, &title);
         }
 
-        ui::print_dry_run_header();
+        // Count by operation type
+        let local_safe: usize = local_branches
+            .iter()
+            .filter(|b| force || b.is_merged)
+            .count();
+        let local_force: usize = local_branches.len() - local_safe;
+        let remote_count: usize = remote_branches.len();
+        let total = local_branches.len() + remote_count;
 
-        for branch in &local_branches {
-            let flag = if force || branch.is_merged {
-                "-d"
-            } else {
-                "-D"
-            };
-            ui::print_dry_run_command(&format!("git branch {} {}", flag, branch.name));
-        }
-
-        for branch in &remote_branches {
-            let name = branch.name.strip_prefix("origin/").unwrap_or(&branch.name);
-            ui::print_dry_run_command(&format!("git push origin --delete {}", name));
-        }
-
-        ui::print_dry_run_footer();
+        ui::print_dry_run_summary(total, local_safe, local_force, remote_count);
         return Ok(());
     }
 

@@ -649,9 +649,8 @@ fn draw_executing(frame: &mut Frame, app: &App) {
     let total = app.selected_count();
     let completed = app.deletion_results.len();
 
-    // Compute content height: backup line + results + pending indicator + gauge
-    let backup_lines: u16 = if app.backup_path.is_some() { 2 } else { 0 };
-    let content_height = backup_lines + completed as u16 + 3; // +3 for blank + gauge + blank
+    // Use most of the terminal height (capped by centered_dialog)
+    let content_height = area.height.saturating_sub(6);
 
     let dialog = centered_dialog(area, content_height);
     frame.render_widget(Clear, dialog);
@@ -675,6 +674,7 @@ fn draw_executing(frame: &mut Frame, app: &App) {
 
     let mut lines: Vec<Line> = Vec::new();
 
+    let backup_lines: u16 = if app.backup_path.is_some() { 2 } else { 0 };
     if let Some(ref path) = app.backup_path {
         lines.push(Line::from(Span::styled(
             format!("  Backup: {}", path),
@@ -683,7 +683,17 @@ fn draw_executing(frame: &mut Frame, app: &App) {
         lines.push(Line::from(""));
     }
 
-    for result in &app.deletion_results {
+    // Show only the tail of results that fit the content area,
+    // so the list scrolls like a log during large deletions.
+    let max_result_lines = content_area.height.saturating_sub(backup_lines + 1) as usize; // +1 for pending line
+    let skip = app.deletion_results.len().saturating_sub(max_result_lines);
+    if skip > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  ... {} more above", skip),
+            Style::default().fg(GRAY),
+        )));
+    }
+    for result in app.deletion_results.iter().skip(skip) {
         let (icon, color) = if result.success {
             (CHECK, GREEN)
         } else {

@@ -173,26 +173,44 @@ pub fn info(message: &str) {
     println!("{} {}", style("ℹ️").blue().bold(), message);
 }
 
-/// Print dry-run header
-pub fn print_dry_run_header() {
+/// Print a grouped dry-run summary instead of listing every command.
+pub fn print_dry_run_summary(total: usize, local_safe: usize, local_force: usize, remote: usize) {
     println!(
         "\n{}\n",
         style("[DRY RUN] No branches will be deleted.")
             .yellow()
             .bold()
     );
-    println!("Commands that would run:");
-}
-
-/// Print dry-run command
-pub fn print_dry_run_command(cmd: &str) {
-    println!("  {}", style(cmd).dim());
-}
-
-/// Print dry-run footer
-pub fn print_dry_run_footer() {
-    println!();
-    info("No branches were actually deleted.");
+    println!(
+        "Would execute {} {}:",
+        style(total).bold(),
+        pluralize(total, "command", "commands")
+    );
+    if local_safe > 0 {
+        println!(
+            "  {}  ({} local {})",
+            style("git branch -d").dim(),
+            local_safe,
+            pluralize(local_safe, "branch", "branches")
+        );
+    }
+    if local_force > 0 {
+        println!(
+            "  {}  ({} local unmerged {})",
+            style("git branch -D").dim(),
+            local_force,
+            pluralize(local_force, "branch", "branches")
+        );
+    }
+    if remote > 0 {
+        println!(
+            "  {}  ({} remote {})",
+            style("git push origin --delete").dim(),
+            remote,
+            pluralize(remote, "branch", "branches")
+        );
+    }
+    println!("\nRun without {} to execute.", style("--dry-run").bold());
 }
 
 /// Display remote deletion warning and get confirmation
