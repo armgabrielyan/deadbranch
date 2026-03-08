@@ -345,6 +345,16 @@ impl App {
         }
     }
 
+    /// Invert selection of all visible selectable branches
+    pub fn invert_selection(&mut self) {
+        for &idx in &self.visible {
+            let branch = &self.all_branches[idx];
+            if branch.is_merged || self.force {
+                self.selected[idx] = !self.selected[idx];
+            }
+        }
+    }
+
     /// Deselect all branches
     pub fn deselect_all(&mut self) {
         for s in &mut self.selected {
@@ -735,6 +745,55 @@ mod tests {
         // Toggle on
         app.select_all();
         assert_eq!(app.selected_count(), total);
+    }
+
+    #[test]
+    fn test_invert_selection_all_merged_selected_to_none() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        // All merged are pre-selected
+        assert_eq!(app.selected_count(), 3);
+        app.invert_selection();
+        // All merged should now be deselected, unmerged unchanged (still false)
+        assert_eq!(app.selected_count(), 0);
+    }
+
+    #[test]
+    fn test_invert_selection_none_to_all_merged() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.deselect_all();
+        assert_eq!(app.selected_count(), 0);
+        app.invert_selection();
+        // Only merged branches should be selected
+        assert_eq!(app.selected_count(), 3);
+        for (i, branch) in app.all_branches.iter().enumerate() {
+            if branch.is_merged {
+                assert!(app.selected[i]);
+            } else {
+                assert!(!app.selected[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_invert_selection_skips_unmerged_without_force() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.deselect_all();
+        app.invert_selection();
+        // Unmerged branches should remain unselected
+        for (i, branch) in app.all_branches.iter().enumerate() {
+            if !branch.is_merged {
+                assert!(!app.selected[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_invert_selection_with_force_includes_unmerged() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", true);
+        app.deselect_all();
+        app.invert_selection();
+        // All branches (merged + unmerged) should be selected
+        assert_eq!(app.selected_count(), app.all_branches.len());
     }
 
     #[test]

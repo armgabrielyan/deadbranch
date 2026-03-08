@@ -6,6 +6,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
+use crate::branch::AgeSeverity;
+
 use super::app::{App, Mode};
 
 // ── Unicode characters ──────────────────────────────────────────────
@@ -28,6 +30,16 @@ const CYAN: Color = Color::Cyan;
 const BLUE: Color = Color::Blue;
 const GRAY: Color = Color::DarkGray;
 const WHITE: Color = Color::White;
+
+// ── Age color gradient ──────────────────────────────────────────────
+
+fn age_color(age_days: i64) -> Color {
+    match AgeSeverity::from_days(age_days) {
+        AgeSeverity::Fresh => GREEN,
+        AgeSeverity::Moderate => YELLOW,
+        AgeSeverity::Stale => RED,
+    }
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -373,7 +385,8 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 60,
             )),
             sep_cell(),
-            Cell::from(format!("{}d", branch.age_days)).style(Style::default().fg(GRAY)),
+            Cell::from(format!("{}d", branch.age_days))
+                .style(Style::default().fg(age_color(branch.age_days))),
             sep_cell(),
             Cell::from(status_text).style(Style::default().fg(status_color)),
             sep_cell(),
@@ -915,7 +928,7 @@ fn draw_help_overlay(frame: &mut Frame) {
 
     // Center the overlay
     let width = 50.min(area.width.saturating_sub(4));
-    let height = 28.min(area.height.saturating_sub(4));
+    let height = 29.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let overlay_area = Rect::new(x, y, width, height);
@@ -951,6 +964,7 @@ fn draw_help_overlay(frame: &mut Frame) {
         help_line("a", "Toggle all merged"),
         help_line("A", "Toggle all (force mode)"),
         help_line("n", "Deselect all"),
+        help_line("i", "Invert selection"),
         Line::from(""),
         Line::from(Span::styled(
             " Actions",
@@ -1050,5 +1064,23 @@ mod tests {
         assert_eq!(line.spans.len(), 2);
         assert_eq!(line.spans[0].content, "bar-");
         assert_eq!(line.spans[1].content, "foo");
+    }
+
+    #[test]
+    fn age_color_green_for_fresh_branches() {
+        assert_eq!(age_color(0), GREEN);
+        assert_eq!(age_color(30), GREEN);
+    }
+
+    #[test]
+    fn age_color_yellow_for_moderate_branches() {
+        assert_eq!(age_color(31), YELLOW);
+        assert_eq!(age_color(90), YELLOW);
+    }
+
+    #[test]
+    fn age_color_red_for_stale_branches() {
+        assert_eq!(age_color(91), RED);
+        assert_eq!(age_color(365), RED);
     }
 }

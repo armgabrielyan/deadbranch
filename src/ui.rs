@@ -13,7 +13,7 @@ use crate::backup::{
     BackupBranchEntry, BackupStats, BackupToDelete, CleanResult, RestoreError, RestoreResult,
     SkippedLine,
 };
-use crate::branch::Branch;
+use crate::branch::{AgeSeverity, Branch};
 use crate::stats::RepoStats;
 
 /// Generic pluralization helper
@@ -97,7 +97,11 @@ pub fn display_branches(branches: &[Branch], title: &str) {
         table.add_row(vec![
             Cell::new((i + 1).to_string()).fg(Color::DarkGrey),
             Cell::new(&branch.name),
-            Cell::new(branch.format_age()),
+            Cell::new(branch.format_age()).fg(match branch.age_severity() {
+                AgeSeverity::Fresh => Color::Green,
+                AgeSeverity::Moderate => Color::Yellow,
+                AgeSeverity::Stale => Color::Red,
+            }),
             status,
             branch_type,
             Cell::new(branch.last_commit_date.format("%Y-%m-%d").to_string()).fg(Color::DarkGrey),

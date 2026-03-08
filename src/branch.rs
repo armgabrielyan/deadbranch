@@ -2,6 +2,28 @@
 
 use chrono::{DateTime, Utc};
 
+/// Age severity for color coding across UIs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgeSeverity {
+    /// 0-30 days → green
+    Fresh,
+    /// 31-90 days → yellow
+    Moderate,
+    /// 91+ days → red
+    Stale,
+}
+
+impl AgeSeverity {
+    /// Determine severity from age in days
+    pub fn from_days(age_days: i64) -> Self {
+        match age_days {
+            0..=30 => AgeSeverity::Fresh,
+            31..=90 => AgeSeverity::Moderate,
+            _ => AgeSeverity::Stale,
+        }
+    }
+}
+
 /// Represents a git branch with metadata
 #[derive(Debug, Clone)]
 pub struct Branch {
@@ -87,6 +109,11 @@ impl Branch {
         }
     }
 
+    /// Get the age severity category for color coding
+    pub fn age_severity(&self) -> AgeSeverity {
+        AgeSeverity::from_days(self.age_days)
+    }
+
     /// Format age in a human-readable way
     pub fn format_age(&self) -> String {
         if self.age_days == 1 {
@@ -149,15 +176,15 @@ impl BranchFilter {
     }
 }
 
-/// Sort branches: unmerged first, then by age (newest first)
+/// Sort branches: merged first, then by age (oldest first)
 pub fn sort_branches(branches: &mut [Branch]) {
     branches.sort_by(|a, b| {
-        // First: unmerged before merged
+        // First: merged before unmerged (actionable items first)
         match (a.is_merged, b.is_merged) {
-            (false, true) => std::cmp::Ordering::Less,
-            (true, false) => std::cmp::Ordering::Greater,
-            // Then: newest first (lower age_days first)
-            _ => a.age_days.cmp(&b.age_days),
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            // Then: oldest first (higher age_days first)
+            _ => b.age_days.cmp(&a.age_days),
         }
     });
 }
@@ -399,11 +426,11 @@ mod tests {
 
         sort_branches(&mut branches);
 
-        // Unmerged branches should come first
-        assert!(!branches[0].is_merged);
-        assert!(!branches[1].is_merged);
-        assert!(branches[2].is_merged);
-        assert!(branches[3].is_merged);
+        // Merged branches should come first
+        assert!(branches[0].is_merged);
+        assert!(branches[1].is_merged);
+        assert!(!branches[2].is_merged);
+        assert!(!branches[3].is_merged);
     }
 
     #[test]
@@ -417,12 +444,36 @@ mod tests {
 
         sort_branches(&mut branches);
 
-        // Within unmerged: older (40) before newer (20)
-        assert_eq!(branches[0].name, "unmerged_newer");
-        assert_eq!(branches[1].name, "unmerged_older");
+        // Within merged: oldest first (30 before 10)
+        assert_eq!(branches[0].name, "merged_older");
+        assert_eq!(branches[1].name, "merged_newer");
 
-        // Within merged: older (30) before newer (10)
-        assert_eq!(branches[2].name, "merged_newer");
-        assert_eq!(branches[3].name, "merged_older");
+        // Within unmerged: oldest first (40 before 20)
+        assert_eq!(branches[2].name, "unmerged_older");
+        assert_eq!(branches[3].name, "unmerged_newer");
+    }
+
+    #[test]
+    fn test_age_severity_fresh() {
+        let branch = test_branch("test", 0, false, false);
+        assert_eq!(branch.age_severity(), AgeSeverity::Fresh);
+        let branch = test_branch("test", 30, false, false);
+        assert_eq!(branch.age_severity(), AgeSeverity::Fresh);
+    }
+
+    #[test]
+    fn test_age_severity_moderate() {
+        let branch = test_branch("test", 31, false, false);
+        assert_eq!(branch.age_severity(), AgeSeverity::Moderate);
+        let branch = test_branch("test", 90, false, false);
+        assert_eq!(branch.age_severity(), AgeSeverity::Moderate);
+    }
+
+    #[test]
+    fn test_age_severity_stale() {
+        let branch = test_branch("test", 91, false, false);
+        assert_eq!(branch.age_severity(), AgeSeverity::Stale);
+        let branch = test_branch("test", 365, false, false);
+        assert_eq!(branch.age_severity(), AgeSeverity::Stale);
     }
 }

@@ -229,6 +229,7 @@ fn handle_browse_key(app: &mut App, key: KeyEvent) -> bool {
         KeyCode::Char('a') => app.select_all_merged(),
         KeyCode::Char('A') => app.select_all(),
         KeyCode::Char('n') => app.deselect_all(),
+        KeyCode::Char('i') => app.invert_selection(),
         KeyCode::Char('d') => {
             if app.selected_count() > 0 {
                 app.confirm_input.clear();
