@@ -47,6 +47,47 @@ fn truncate_name(name: &str, max_len: usize) -> String {
     }
 }
 
+/// Build a styled Line for a branch name with search matches highlighted.
+///
+/// Non-matching parts use `base_style`; matching parts get yellow bold on top.
+/// Case-insensitive. The name is truncated to `max_len` before highlighting.
+fn highlight_search<'a>(name: &str, query: &str, base_style: Style, max_len: usize) -> Line<'a> {
+    let display = truncate_name(name, max_len);
+    if query.is_empty() {
+        return Line::from(Span::styled(display, base_style));
+    }
+
+    let match_style = base_style.fg(YELLOW).add_modifier(Modifier::BOLD);
+    let lower = display.to_lowercase();
+    let query_lower = query.to_lowercase();
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    let mut last_end = 0;
+
+    for (start, _) in lower.match_indices(&query_lower) {
+        if start > last_end {
+            spans.push(Span::styled(
+                display[last_end..start].to_string(),
+                base_style,
+            ));
+        }
+        spans.push(Span::styled(
+            display[start..start + query_lower.len()].to_string(),
+            match_style,
+        ));
+        last_end = start + query_lower.len();
+    }
+
+    if last_end < display.len() {
+        spans.push(Span::styled(display[last_end..].to_string(), base_style));
+    }
+
+    if spans.is_empty() {
+        Line::from(Span::styled(display, base_style))
+    } else {
+        Line::from(spans)
+    }
+}
+
 /// Compute a centered rectangle for dialog boxes.
 /// Uses percentage of terminal width (min 50 chars) and fits content height.
 fn centered_dialog(area: Rect, content_lines: u16) -> Rect {
@@ -185,6 +226,10 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
         width: table_width,
         ..area
     };
+
+    // Store how many data rows are visible (subtract header + horizontal rule)
+    app.table_visible_rows = area.height.saturating_sub(2) as usize;
+
     if app.visible.is_empty() {
         let msg = if app.search_query.is_empty() {
             "No branches match current filters"
@@ -321,7 +366,12 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
             Cell::from(selector),
             Cell::from(line_num).style(line_num_style),
             sep_cell(),
-            Cell::from(truncate_name(&branch.name, 60)).style(name_style),
+            Cell::from(highlight_search(
+                &branch.name,
+                &app.search_query,
+                name_style,
+                60,
+            )),
             sep_cell(),
             Cell::from(format!("{}d", branch.age_days)).style(Style::default().fg(GRAY)),
             sep_cell(),
@@ -865,7 +915,7 @@ fn draw_help_overlay(frame: &mut Frame) {
 
     // Center the overlay
     let width = 50.min(area.width.saturating_sub(4));
-    let height = 23.min(area.height.saturating_sub(4));
+    let height = 28.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let overlay_area = Rect::new(x, y, width, height);
@@ -887,6 +937,10 @@ fn draw_help_overlay(frame: &mut Frame) {
         )),
         help_line("j / Down", "Move down"),
         help_line("k / Up", "Move up"),
+        help_line("gg", "Jump to top"),
+        help_line("G", "Jump to bottom"),
+        help_line("Ctrl+d/u", "Half-page down/up"),
+        help_line("Ctrl+f/b", "Full-page down/up"),
         help_line("Scroll", "Mouse scroll"),
         Line::from(""),
         Line::from(Span::styled(
@@ -932,4 +986,69 @@ fn help_line<'a>(key: &'a str, desc: &'a str) -> Line<'a> {
         Span::styled(format!("  {:>12}", key), Style::default().fg(YELLOW)),
         Span::styled(format!("  {}", desc), Style::default().fg(WHITE)),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base() -> Style {
+        Style::default().fg(WHITE)
+    }
+
+    #[test]
+    fn highlight_empty_query_returns_single_span() {
+        let line = highlight_search("feature/foo", "", base(), 60);
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content, "feature/foo");
+    }
+
+    #[test]
+    fn highlight_substring_match() {
+        let line = highlight_search("feature/foo", "foo", base(), 60);
+        assert_eq!(line.spans.len(), 2);
+        assert_eq!(line.spans[0].content, "feature/");
+        assert_eq!(line.spans[1].content, "foo");
+        assert!(line.spans[1].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn highlight_case_insensitive() {
+        let line = highlight_search("Feature/FOO", "foo", base(), 60);
+        assert_eq!(line.spans.len(), 2);
+        assert_eq!(line.spans[0].content, "Feature/");
+        assert_eq!(line.spans[1].content, "FOO");
+    }
+
+    #[test]
+    fn highlight_multiple_matches() {
+        let line = highlight_search("foo-bar-foo", "foo", base(), 60);
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[0].content, "foo");
+        assert_eq!(line.spans[1].content, "-bar-");
+        assert_eq!(line.spans[2].content, "foo");
+    }
+
+    #[test]
+    fn highlight_no_match() {
+        let line = highlight_search("feature/bar", "xyz", base(), 60);
+        assert_eq!(line.spans.len(), 1);
+        assert_eq!(line.spans[0].content, "feature/bar");
+    }
+
+    #[test]
+    fn highlight_match_at_start() {
+        let line = highlight_search("foo-bar", "foo", base(), 60);
+        assert_eq!(line.spans.len(), 2);
+        assert_eq!(line.spans[0].content, "foo");
+        assert_eq!(line.spans[1].content, "-bar");
+    }
+
+    #[test]
+    fn highlight_match_at_end() {
+        let line = highlight_search("bar-foo", "foo", base(), 60);
+        assert_eq!(line.spans.len(), 2);
+        assert_eq!(line.spans[0].content, "bar-");
+        assert_eq!(line.spans[1].content, "foo");
+    }
 }

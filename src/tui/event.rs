@@ -184,10 +184,47 @@ fn handle_browse_key(app: &mut App, key: KeyEvent) -> bool {
         return false;
     }
 
+    // Handle pending 'g' for gg (jump to top)
+    if app.pending_g {
+        app.pending_g = false;
+        if key.code == KeyCode::Char('g') {
+            app.jump_to_top();
+            return false;
+        }
+        // Any other key: cancel pending g, fall through to normal handling
+    }
+
+    // Ctrl-key bindings (must precede plain char arms)
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('d') => {
+                let half = app.table_visible_rows / 2;
+                app.page_down(half.max(1));
+                return false;
+            }
+            KeyCode::Char('u') => {
+                let half = app.table_visible_rows / 2;
+                app.page_up(half.max(1));
+                return false;
+            }
+            KeyCode::Char('f') => {
+                app.page_down(app.table_visible_rows.max(1));
+                return false;
+            }
+            KeyCode::Char('b') => {
+                app.page_up(app.table_visible_rows.max(1));
+                return false;
+            }
+            _ => {}
+        }
+    }
+
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => return true,
         KeyCode::Up | KeyCode::Char('k') => app.cursor_up(),
         KeyCode::Down | KeyCode::Char('j') => app.cursor_down(),
+        KeyCode::Char('g') => app.pending_g = true,
+        KeyCode::Char('G') => app.jump_to_bottom(),
         KeyCode::Char(' ') => app.toggle_selection(),
         KeyCode::Char('a') => app.select_all_merged(),
         KeyCode::Char('A') => app.select_all(),

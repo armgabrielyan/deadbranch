@@ -124,6 +124,10 @@ pub struct App {
     pub table_state: TableState,
     /// Branches remaining to be deleted (for incremental deletion)
     pub pending_deletions: Vec<Branch>,
+    /// Whether 'g' was pressed and we're waiting for the second 'g'
+    pub pending_g: bool,
+    /// Number of branch rows visible in the table viewport (set during render)
+    pub table_visible_rows: usize,
 }
 
 impl App {
@@ -160,6 +164,8 @@ impl App {
             show_help: false,
             table_state: TableState::default(),
             pending_deletions: Vec::new(),
+            pending_g: false,
+            table_visible_rows: 0,
             all_branches,
         };
 
@@ -255,6 +261,27 @@ impl App {
         if !self.visible.is_empty() && self.cursor < self.visible.len() - 1 {
             self.cursor += 1;
         }
+    }
+
+    /// Jump cursor to the first branch
+    pub fn jump_to_top(&mut self) {
+        self.cursor = 0;
+    }
+
+    /// Jump cursor to the last branch
+    pub fn jump_to_bottom(&mut self) {
+        self.cursor = self.visible.len().saturating_sub(1);
+    }
+
+    /// Move cursor down by `n` rows, clamping to the end
+    pub fn page_down(&mut self, n: usize) {
+        let max = self.visible.len().saturating_sub(1);
+        self.cursor = (self.cursor + n).min(max);
+    }
+
+    /// Move cursor up by `n` rows, clamping to zero
+    pub fn page_up(&mut self, n: usize) {
+        self.cursor = self.cursor.saturating_sub(n);
     }
 
     /// Get the branch currently under the cursor, if any
@@ -836,5 +863,73 @@ mod tests {
         assert_eq!(order_branch, vec!["alpha", "zebra"]);
 
         assert_ne!(order_age, order_branch);
+    }
+
+    #[test]
+    fn test_jump_to_top() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.cursor = 3;
+        app.jump_to_top();
+        assert_eq!(app.cursor, 0);
+    }
+
+    #[test]
+    fn test_jump_to_bottom() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.jump_to_bottom();
+        assert_eq!(app.cursor, app.visible.len() - 1);
+    }
+
+    #[test]
+    fn test_jump_to_bottom_empty() {
+        let mut app = App::new(Vec::new(), &default_filter(), "main", false);
+        app.jump_to_bottom();
+        assert_eq!(app.cursor, 0);
+    }
+
+    #[test]
+    fn test_page_down() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.cursor = 0;
+        app.page_down(2);
+        assert_eq!(app.cursor, 2);
+    }
+
+    #[test]
+    fn test_page_down_clamps() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.cursor = 0;
+        app.page_down(100);
+        assert_eq!(app.cursor, app.visible.len() - 1);
+    }
+
+    #[test]
+    fn test_page_up() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.cursor = 3;
+        app.page_up(2);
+        assert_eq!(app.cursor, 1);
+    }
+
+    #[test]
+    fn test_page_up_clamps() {
+        let mut app = App::new(sample_branches(), &default_filter(), "main", false);
+        app.cursor = 1;
+        app.page_up(100);
+        assert_eq!(app.cursor, 0);
+    }
+
+    #[test]
+    fn test_page_down_empty() {
+        let mut app = App::new(Vec::new(), &default_filter(), "main", false);
+        app.page_down(5);
+        assert_eq!(app.cursor, 0);
+    }
+
+    #[test]
+    fn test_page_up_empty() {
+        let mut app = App::new(Vec::new(), &default_filter(), "main", false);
+        app.page_up(5);
+        assert_eq!(app.cursor, 0);
     }
 }
