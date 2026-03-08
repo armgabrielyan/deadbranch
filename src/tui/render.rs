@@ -200,6 +200,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Build table rows and track cursor-to-table-row mapping
+    let num_cols = 12; // selector + # + separators + data columns
     let mut rows: Vec<Row> = Vec::new();
     let mut cursor_table_row: usize = 0;
     let mut last_was_merged: Option<bool> = None;
@@ -219,16 +220,18 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
             // Top margin via bottom_margin on previous row, or empty spacer row
             if !rows.is_empty() {
                 // Add a blank spacer row before section header
-                rows.push(Row::new(vec![Cell::from(""); 10]));
+                rows.push(Row::new(vec![Cell::from(""); num_cols]));
             }
             rows.push(
                 Row::new(vec![
+                    Cell::from(""),
                     Cell::from(""),
                     sep_cell(),
                     Cell::from(Span::styled(
                         label,
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     )),
+                    Cell::from(""),
                     Cell::from(""),
                     Cell::from(""),
                     Cell::from(""),
@@ -280,6 +283,19 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
             ))
         };
 
+        // Neovim-style line number: absolute on cursor, relative distance elsewhere
+        let line_num = if is_focused {
+            format!("{:>3}", row_idx + 1)
+        } else {
+            let distance = (row_idx as isize - app.cursor as isize).unsigned_abs();
+            format!("{:>3}", distance)
+        };
+        let line_num_style = if is_focused {
+            Style::default().fg(YELLOW)
+        } else {
+            Style::default().fg(GRAY)
+        };
+
         let name_style = if is_locked {
             Style::default().fg(GRAY)
         } else if is_focused {
@@ -304,6 +320,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
 
         rows.push(Row::new(vec![
             Cell::from(selector),
+            Cell::from(line_num).style(line_num_style),
             sep_cell(),
             Cell::from(truncate_name(&branch.name, 60)).style(name_style),
             sep_cell(),
@@ -319,6 +336,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
     // Column widths: data columns with thin separator columns between them
     let widths = [
         Constraint::Length(5),  // selector: "▶ [x]"
+        Constraint::Length(3),  // line number: "  1" / " 42"
         Constraint::Length(1),  // separator │
         Constraint::Fill(1),    // branch name: fills remaining space
         Constraint::Length(1),  // separator │
@@ -335,6 +353,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let sep_header = Cell::from(SEP).style(Style::default().fg(GRAY));
     let header = Row::new(vec![
         Cell::from(""),
+        Cell::from("#").style(header_style),
         sep_header.clone(),
         Cell::from("Branch").style(header_style),
         sep_header.clone(),
@@ -351,6 +370,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let hr = |width: u16| Cell::from("\u{2500}".repeat(width as usize)).style(hr_style);
     let hr_row = Row::new(vec![
         hr(5),                                  // selector
+        hr(3),                                  // line number
         Cell::from("\u{253c}").style(hr_style), // ┼
         hr(200),                                // branch (clipped by Fill constraint)
         Cell::from("\u{253c}").style(hr_style), // ┼
@@ -368,8 +388,14 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let table = Table::new(rows, widths).header(header).column_spacing(1);
 
-    // Update table state for auto-scrolling
+    // Update table state for auto-scrolling.
+    // When cursor is near the top of the viewport, back up the offset
+    // to keep section headers visible above the first branch in each group.
     app.table_state.select(Some(cursor_table_row));
+    let offset = app.table_state.offset();
+    if cursor_table_row > 0 && cursor_table_row <= offset + 1 {
+        *app.table_state.offset_mut() = cursor_table_row.saturating_sub(2);
+    }
     frame.render_stateful_widget(table, area, &mut app.table_state);
 }
 
