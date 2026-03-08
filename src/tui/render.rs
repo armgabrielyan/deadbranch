@@ -200,7 +200,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Build table rows and track cursor-to-table-row mapping
-    let num_cols = 12; // selector + # + separators + data columns
+    let num_cols = 11; // selector + # + separators + data columns
     let mut rows: Vec<Row> = Vec::new();
     let mut cursor_table_row: usize = 0;
     let mut last_was_merged: Option<bool> = None;
@@ -231,7 +231,6 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
                         label,
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     )),
-                    Cell::from(""),
                     Cell::from(""),
                     Cell::from(""),
                     Cell::from(""),
@@ -856,7 +855,7 @@ fn draw_help_overlay(frame: &mut Frame) {
 
     // Center the overlay
     let width = 50.min(area.width.saturating_sub(4));
-    let height = 22.min(area.height.saturating_sub(4));
+    let height = 23.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(width)) / 2;
     let y = (area.height.saturating_sub(height)) / 2;
     let overlay_area = Rect::new(x, y, width, height);
@@ -878,6 +877,7 @@ fn draw_help_overlay(frame: &mut Frame) {
         )),
         help_line("j / Down", "Move down"),
         help_line("k / Up", "Move up"),
+        help_line("Scroll", "Mouse scroll"),
         Line::from(""),
         Line::from(Span::styled(
             " Selection",

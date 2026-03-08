@@ -5,7 +5,10 @@ use std::panic;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    MouseEvent, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -25,13 +28,13 @@ type Term = Terminal<CrosstermBackend<io::Stdout>>;
 fn setup_terminal() -> Result<Term> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
     // Install a panic hook that restores the terminal before printing the panic
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         original_hook(info);
     }));
 
@@ -43,7 +46,7 @@ fn setup_terminal() -> Result<Term> {
 /// Restore the terminal to its original state.
 fn restore_terminal() -> Result<()> {
     disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
     Ok(())
 }
 
@@ -90,37 +93,55 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
             continue;
         }
 
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                // Ctrl+C always exits
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-                    return Ok(());
-                }
+        // Wait for the first event, then drain any already-queued events
+        // without blocking. This prevents mouse scroll flooding while keeping
+        // keyboard input responsive (no lag on key repeat).
+        if !event::poll(Duration::from_millis(100))? {
+            continue;
+        }
+        loop {
+            match event::read()? {
+                Event::Key(key) => {
+                    // Ctrl+C always exits
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && key.code == KeyCode::Char('c')
+                    {
+                        return Ok(());
+                    }
 
-                match app.mode {
-                    Mode::Browse => {
-                        if handle_browse_key(app, key) {
-                            return Ok(());
+                    match app.mode {
+                        Mode::Browse => {
+                            if handle_browse_key(app, key) {
+                                return Ok(());
+                            }
                         }
-                    }
-                    Mode::Filter => handle_filter_key(app, key),
-                    Mode::Confirm => {
-                        if handle_confirm_key(app, key) {
-                            return Ok(());
+                        Mode::Filter => handle_filter_key(app, key),
+                        Mode::Confirm => {
+                            if handle_confirm_key(app, key) {
+                                return Ok(());
+                            }
                         }
-                    }
-                    Mode::Executing => {
-                        // No input during execution
-                    }
-                    Mode::Summary => {
-                        if key.code == KeyCode::Esc {
-                            app.apply_deletions_and_reset();
-                            app.mode = Mode::Browse;
-                        } else {
-                            return Ok(());
+                        Mode::Executing => {
+                            // No input during execution
+                        }
+                        Mode::Summary => {
+                            if key.code == KeyCode::Esc {
+                                app.apply_deletions_and_reset();
+                                app.mode = Mode::Browse;
+                            } else {
+                                return Ok(());
+                            }
                         }
                     }
                 }
+                Event::Mouse(mouse) => {
+                    handle_mouse(app, mouse);
+                }
+                _ => {} // Resize, FocusGained, etc. — ignored
+            }
+            // Drain remaining queued events without blocking
+            if !event::poll(Duration::ZERO)? {
+                break;
             }
         }
     }
@@ -161,6 +182,18 @@ fn handle_browse_key(app: &mut App, key: KeyEvent) -> bool {
     }
 
     false
+}
+
+/// Handle mouse events (scroll wheel in Browse mode).
+fn handle_mouse(app: &mut App, mouse: MouseEvent) {
+    if app.mode != Mode::Browse {
+        return;
+    }
+    match mouse.kind {
+        MouseEventKind::ScrollUp => app.cursor_up(),
+        MouseEventKind::ScrollDown => app.cursor_down(),
+        _ => {}
+    }
 }
 
 /// Handle key events in Filter mode.
