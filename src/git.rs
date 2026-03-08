@@ -1,8 +1,10 @@
 //! Git operations - shells out to git CLI for reliability
 
+use std::collections::HashSet;
+use std::process::Command;
+
 use anyhow::{Context, Result};
 use chrono::{TimeZone, Utc};
-use std::process::Command;
 
 use crate::branch::Branch;
 use crate::error::DeadbranchError;
@@ -80,22 +82,54 @@ pub fn fetch_and_prune() -> Result<()> {
 
 /// List all branches (local and remote)
 pub fn list_branches(default_branch: &str) -> Result<Vec<Branch>> {
-    let mut branches = Vec::new();
+    // Fetch all merged branches once (instead of per-branch)
+    let merged = get_merged_branches(default_branch)?;
 
-    // Get local branches
-    let local_branches = list_local_branches(default_branch)?;
-    branches.extend(local_branches);
-
-    // Get remote branches
-    let remote_branches = list_remote_branches(default_branch)?;
-    branches.extend(remote_branches);
+    let mut branches = list_local_branches(&merged)?;
+    branches.extend(list_remote_branches(default_branch, &merged)?);
 
     Ok(branches)
 }
 
+/// Get the set of all branches merged into the default branch.
+/// Called once and shared across local/remote listing for O(1) lookups.
+fn get_merged_branches(default_branch: &str) -> Result<HashSet<String>> {
+    let output = Command::new("git")
+        .args(["branch", "--merged", default_branch, "-a"])
+        .output()
+        .context("Failed to check merged branches")?;
+
+    if !output.status.success() {
+        return Ok(HashSet::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_merged_branches(&stdout))
+}
+
+/// Parse `git branch --merged` output into a set of branch names.
+/// Handles local branches, current branch marker (`*`), and remote refs
+/// (inserting both `remotes/origin/foo` and `origin/foo` forms).
+fn parse_merged_branches(stdout: &str) -> HashSet<String> {
+    let mut merged = HashSet::new();
+
+    for line in stdout.lines() {
+        let name = line.trim().trim_start_matches("* ");
+        if name.is_empty() {
+            continue;
+        }
+        merged.insert(name.to_string());
+        // Also insert without "remotes/" prefix for remote branch lookups
+        if let Some(stripped) = name.strip_prefix("remotes/") {
+            merged.insert(stripped.to_string());
+        }
+    }
+
+    merged
+}
+
 /// List local branches with metadata
-fn list_local_branches(default_branch: &str) -> Result<Vec<Branch>> {
-    // Format: refname:short, authordate:unix, objectname:short, authorname
+fn list_local_branches(merged: &HashSet<String>) -> Result<Vec<Branch>> {
     let output = Command::new("git")
         .args([
             "for-each-ref",
@@ -134,7 +168,7 @@ fn list_local_branches(default_branch: &str) -> Result<Vec<Branch>> {
 
         let commit_date = Utc.timestamp_opt(timestamp, 0).unwrap();
         let age_days = (now - commit_date).num_days();
-        let is_merged = check_branch_merged(&name, default_branch)?;
+        let is_merged = merged.contains(&name);
 
         branches.push(Branch {
             name,
@@ -151,7 +185,7 @@ fn list_local_branches(default_branch: &str) -> Result<Vec<Branch>> {
 }
 
 /// List remote branches with metadata
-fn list_remote_branches(default_branch: &str) -> Result<Vec<Branch>> {
+fn list_remote_branches(default_branch: &str, merged: &HashSet<String>) -> Result<Vec<Branch>> {
     let output = Command::new("git")
         .args([
             "for-each-ref",
@@ -189,7 +223,7 @@ fn list_remote_branches(default_branch: &str) -> Result<Vec<Branch>> {
 
         let commit_date = Utc.timestamp_opt(timestamp, 0).unwrap();
         let age_days = (now - commit_date).num_days();
-        let is_merged = check_branch_merged(&name, default_branch)?;
+        let is_merged = merged.contains(&name);
 
         branches.push(Branch {
             name,
@@ -203,31 +237,6 @@ fn list_remote_branches(default_branch: &str) -> Result<Vec<Branch>> {
     }
 
     Ok(branches)
-}
-
-/// Check if a branch is merged into the default branch
-fn check_branch_merged(branch: &str, default_branch: &str) -> Result<bool> {
-    let output = Command::new("git")
-        .args(["branch", "--merged", default_branch, "-a"])
-        .output()
-        .context("Failed to check merged branches")?;
-
-    if !output.status.success() {
-        // If the command fails, assume not merged
-        return Ok(false);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    for line in stdout.lines() {
-        let line = line.trim().trim_start_matches("* ");
-        // Handle both local and remote branch names
-        if line == branch || line == format!("remotes/{}", branch) {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
 }
 
 /// Delete a local branch
@@ -280,4 +289,79 @@ pub fn get_branch_sha(branch: &str) -> Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_merged_local_branches() {
+        let output = "  feature/auth\n  bugfix/login\n  cleanup/old-stuff\n";
+        let merged = parse_merged_branches(output);
+        assert!(merged.contains("feature/auth"));
+        assert!(merged.contains("bugfix/login"));
+        assert!(merged.contains("cleanup/old-stuff"));
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn parse_merged_current_branch_marker() {
+        let output = "* main\n  feature/auth\n";
+        let merged = parse_merged_branches(output);
+        assert!(merged.contains("main"));
+        assert!(merged.contains("feature/auth"));
+        assert!(!merged.contains("* main"));
+    }
+
+    #[test]
+    fn parse_merged_remote_branches() {
+        let output = "  remotes/origin/feature/auth\n  remotes/origin/bugfix/login\n";
+        let merged = parse_merged_branches(output);
+        // Both full and stripped forms
+        assert!(merged.contains("remotes/origin/feature/auth"));
+        assert!(merged.contains("origin/feature/auth"));
+        assert!(merged.contains("remotes/origin/bugfix/login"));
+        assert!(merged.contains("origin/bugfix/login"));
+    }
+
+    #[test]
+    fn parse_merged_mixed_local_and_remote() {
+        let output = "\
+* main
+  feature/done
+  remotes/origin/feature/done
+  remotes/origin/cleanup/old
+";
+        let merged = parse_merged_branches(output);
+        assert!(merged.contains("main"));
+        assert!(merged.contains("feature/done"));
+        assert!(merged.contains("origin/feature/done"));
+        assert!(merged.contains("origin/cleanup/old"));
+    }
+
+    #[test]
+    fn parse_merged_empty_output() {
+        let merged = parse_merged_branches("");
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn parse_merged_blank_lines_ignored() {
+        let output = "  feature/auth\n\n  \n  bugfix/login\n";
+        let merged = parse_merged_branches(output);
+        assert!(merged.contains("feature/auth"));
+        assert!(merged.contains("bugfix/login"));
+        assert!(!merged.contains(""));
+    }
+
+    #[test]
+    fn parse_merged_lookup_matches_local_branch() {
+        let output = "  feature/auth\n  remotes/origin/feature/auth\n";
+        let merged = parse_merged_branches(output);
+        // Local branch lookup
+        assert!(merged.contains("feature/auth"));
+        // Remote branch lookup (as used by list_remote_branches)
+        assert!(merged.contains("origin/feature/auth"));
+    }
 }
