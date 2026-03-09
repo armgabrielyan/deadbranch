@@ -18,6 +18,12 @@ Type "deadbranch clean -i"
 Enter
 Sleep 3s
 
+# Show help panel
+Type "?"
+Sleep 3s
+Type "?"
+Sleep 1s
+
 # Navigate down with j
 Type "j"
 Sleep 600ms
@@ -41,6 +47,22 @@ Space
 Sleep 1s
 
 # Deselect all
+Type "n"
+Sleep 1s
+
+# Visual range selection
+Type "V"
+Sleep 800ms
+Type "j"
+Sleep 600ms
+Type "j"
+Sleep 600ms
+Type "j"
+Sleep 800ms
+Space
+Sleep 1.5s
+
+# Deselect all again before search
 Type "n"
 Sleep 1s
 
