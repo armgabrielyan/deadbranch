@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/armgabrielyan/deadbranch/compare/v0.1.4...v0.2.0) (2026-03-09)
+
+
+### Features
+
+* add author name to the output ([#6](https://github.com/armgabrielyan/deadbranch/issues/6)) ([c56a688](https://github.com/armgabrielyan/deadbranch/commit/c56a6889b0e3edbd1dace9506283a8b01203cc4d))
+* interactive TUI with vim-style navigation ([#11](https://github.com/armgabrielyan/deadbranch/issues/11)) ([7c7f1dd](https://github.com/armgabrielyan/deadbranch/commit/7c7f1dd35399aca8b24d055cdb10ab17e8eee0a7))
+
 ## [0.1.4](https://github.com/armgabrielyan/deadbranch/compare/v0.1.3...v0.1.4) (2026-03-02)
 
 
