@@ -34,6 +34,8 @@ pub enum SortOrder {
     Type,
     /// Sort by last commit date (oldest first)
     LastCommit,
+    /// Sort by author name (alphabetical)
+    Author,
 }
 
 impl SortOrder {
@@ -44,7 +46,8 @@ impl SortOrder {
             SortOrder::Age => SortOrder::Status,
             SortOrder::Status => SortOrder::Type,
             SortOrder::Type => SortOrder::LastCommit,
-            SortOrder::LastCommit => SortOrder::Branch,
+            SortOrder::LastCommit => SortOrder::Author,
+            SortOrder::Author => SortOrder::Branch,
         }
     }
 
@@ -56,6 +59,7 @@ impl SortOrder {
             SortOrder::Status => "Status",
             SortOrder::Type => "Type",
             SortOrder::LastCommit => "Last Commit",
+            SortOrder::Author => "Author",
         }
     }
 
@@ -67,6 +71,7 @@ impl SortOrder {
             SortOrder::Status => true,      // merged first
             SortOrder::Type => true,        // local first
             SortOrder::LastCommit => false, // oldest first
+            SortOrder::Author => true,      // A → Z
         }
     }
 }
@@ -251,6 +256,7 @@ impl App {
                 SortOrder::Status => ba.is_merged.cmp(&bb.is_merged),
                 SortOrder::Type => ba.is_remote.cmp(&bb.is_remote),
                 SortOrder::LastCommit => bb.last_commit_date.cmp(&ba.last_commit_date),
+                SortOrder::Author => ba.last_commit_author.cmp(&bb.last_commit_author),
             };
 
             if ascending {
@@ -571,6 +577,7 @@ mod tests {
             is_remote,
             last_commit_sha: "abc123".to_string(),
             last_commit_date: Utc::now(),
+            last_commit_author: "testuser".to_string(),
         }
     }
 
@@ -909,6 +916,9 @@ mod tests {
         assert_eq!(app.sort_order, SortOrder::LastCommit);
 
         app.cycle_sort();
+        assert_eq!(app.sort_order, SortOrder::Author);
+
+        app.cycle_sort();
         assert_eq!(app.sort_order, SortOrder::Branch);
 
         app.cycle_sort();
@@ -944,6 +954,7 @@ mod tests {
         assert_eq!(SortOrder::Status.label(), "Status");
         assert_eq!(SortOrder::Type.label(), "Type");
         assert_eq!(SortOrder::LastCommit.label(), "Last Commit");
+        assert_eq!(SortOrder::Author.label(), "Author");
     }
 
     #[test]

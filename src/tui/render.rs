@@ -252,7 +252,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Build table rows and track cursor-to-table-row mapping
-    let num_cols = 11; // selector + # + separators + data columns
+    let num_cols = 12; // selector + # + separators + data columns
     let mut rows: Vec<Row> = Vec::new();
     let mut cursor_table_row: usize = 0;
     let mut last_was_merged: Option<bool> = None;
@@ -283,6 +283,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
                         label,
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     )),
+                    Cell::from(""),
                     Cell::from(""),
                     Cell::from(""),
                     Cell::from(""),
@@ -394,6 +395,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
             sep_cell(),
             Cell::from(type_text).style(Style::default().fg(type_color)),
             Cell::from(date_str).style(Style::default().fg(GRAY)),
+            Cell::from(branch.last_commit_author.as_str()).style(Style::default().fg(WHITE)),
         ]);
 
         if in_visual_range {
@@ -408,7 +410,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
         Constraint::Length(5),  // selector: "▶ [x]"
         Constraint::Length(3),  // line number: "  1" / " 42"
         Constraint::Length(1),  // separator │
-        Constraint::Fill(1),    // branch name: fills remaining space
+        Constraint::Fill(3),    // branch name: 75% of remaining space
         Constraint::Length(1),  // separator │
         Constraint::Length(6),  // age: "1234d"
         Constraint::Length(1),  // separator │
@@ -416,6 +418,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
         Constraint::Length(1),  // separator │
         Constraint::Length(6),  // type: "remote"
         Constraint::Length(11), // date: "Last Commit" / "2026-01-27"
+        Constraint::Fill(1),    // author: 25% of remaining space
     ];
 
     // Header row
@@ -433,6 +436,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
         sep_header,
         Cell::from("Type").style(header_style),
         Cell::from("Last Commit").style(header_style),
+        Cell::from("Author").style(header_style),
     ]);
 
     // Horizontal rule row between header and data
@@ -450,6 +454,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
         Cell::from("\u{253c}").style(hr_style), // ┼
         hr(6),                                  // type
         hr(11),                                 // date
+        hr(200),                                // author (clipped by Fill constraint)
     ]);
 
     // Insert the horizontal rule as the first data row, shifting cursor mapping
