@@ -114,6 +114,7 @@ mod tests {
             is_remote,
             last_commit_sha: "abc123".to_string(),
             last_commit_date: Utc::now(),
+            last_commit_author: "testuser".to_string(),
         }
     }
 

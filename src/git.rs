@@ -95,11 +95,11 @@ pub fn list_branches(default_branch: &str) -> Result<Vec<Branch>> {
 
 /// List local branches with metadata
 fn list_local_branches(default_branch: &str) -> Result<Vec<Branch>> {
-    // Format: refname:short, committerdate:unix, objectname:short
+    // Format: refname:short, authordate:unix, objectname:short, authorname
     let output = Command::new("git")
         .args([
             "for-each-ref",
-            "--format=%(refname:short)|%(committerdate:unix)|%(objectname:short)|%(authorname)",
+            "--format=%(refname:short)|%(authordate:unix)|%(objectname:short)|%(authorname)",
             "refs/heads/",
         ])
         .output()
@@ -143,7 +143,7 @@ fn list_local_branches(default_branch: &str) -> Result<Vec<Branch>> {
             is_remote: false,
             last_commit_sha: sha,
             last_commit_date: commit_date,
-            last_commit_user: author,
+            last_commit_author: author,
         });
     }
 
@@ -155,7 +155,7 @@ fn list_remote_branches(default_branch: &str) -> Result<Vec<Branch>> {
     let output = Command::new("git")
         .args([
             "for-each-ref",
-            "--format=%(refname:short)|%(committerdate:unix)|%(objectname:short)|%(authorname)",
+            "--format=%(refname:short)|%(authordate:unix)|%(objectname:short)|%(authorname)",
             "refs/remotes/origin/",
         ])
         .output()
@@ -198,7 +198,7 @@ fn list_remote_branches(default_branch: &str) -> Result<Vec<Branch>> {
             is_remote: true,
             last_commit_sha: sha,
             last_commit_date: commit_date,
-            last_commit_user: author,
+            last_commit_author: author,
         });
     }
 
