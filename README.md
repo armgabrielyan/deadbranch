@@ -42,7 +42,7 @@
 
 ## Demo
 
-![deadbranch demo](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/demo.gif)
+![deadbranch list](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/list.gif)
 
 ## ✨ Features
 
@@ -53,7 +53,7 @@
 - 💾 **Backup creation** — Saves deleted branch SHAs for easy restoration
 - 👁️ **Dry-run mode** — Preview what would be deleted without making changes
 - 🌐 **Local & remote** — Works with both local and remote branches
-- 🖥️ **Interactive TUI mode** — Browse, filter, and select branches visually with `-i`
+- 🖥️ **Interactive TUI mode** — Full-screen TUI with Vim navigation, fuzzy search, visual range selection, and 6-column sorting
 
 ## 📦 Installation
 
@@ -175,6 +175,8 @@ deadbranch stats
 
 ### 📋 List Stale Branches
 
+![deadbranch list](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/list.gif)
+
 ```bash
 deadbranch list [OPTIONS]
 ```
@@ -208,6 +210,8 @@ Remote Branches:
 ```
 
 ### 🗑️ Delete Stale Branches
+
+![deadbranch clean](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/clean.gif)
 
 ```bash
 deadbranch clean [OPTIONS]
@@ -255,6 +259,8 @@ Deleting local branches...
 
 ### 🖥️ Interactive Mode
 
+![deadbranch interactive](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/interactive.gif)
+
 Open a full-screen TUI for browsing, filtering, and selecting branches to delete:
 
 ```bash
@@ -274,19 +280,36 @@ deadbranch clean -i [OPTIONS]
 
 | Key | Action |
 |-----|--------|
-| `↑`/`k`, `↓`/`j` | Navigate |
+| `j`/`↓`, `k`/`↑` | Navigate down/up |
+| `gg`, `G` | Jump to top/bottom |
+| `Ctrl+d`/`Ctrl+u` | Half-page down/up |
+| `Ctrl+f`/`Ctrl+b` | Full-page down/up |
+| Mouse scroll | Scroll up/down |
 | `Space` | Toggle selection |
+| `V` | Visual range select (Vim-style) |
 | `a` | Select all merged |
 | `A` | Select all (requires `--force`) |
 | `n` | Deselect all |
+| `i` | Invert selection |
 | `d` | Delete selected |
-| `/` | Search by branch name |
-| `s` | Cycle sort (age → name → status) |
+| `/` | Fuzzy search by branch name |
+| `s` | Cycle sort (age → branch → status → type → date → author) |
+| `S` | Reverse sort direction |
 | `m` | Toggle merged-only filter |
 | `l` | Toggle local-only filter |
 | `R` | Toggle remote-only filter |
 | `?` | Help |
 | `q`/`Esc` | Quit |
+
+**TUI features:**
+
+- **Vim-style navigation** — `gg`/`G` jump, `Ctrl+d`/`Ctrl+u` page scrolling, relative line numbers
+- **Visual range selection** — Press `V` to anchor, move cursor to extend range, `Space` to toggle
+- **Fuzzy search** — `/` opens search with matched characters highlighted
+- **Age coloring** — Green (<30d), yellow (31–90d), red (>90d)
+- **Sections** — Merged and unmerged branches are visually grouped with section headers
+- **Progressive deletion** — Live progress bar during batch deletion
+- **Smart confirmation** — Simple confirm for safe deletions, typed `yes` for risky ones (unmerged/remote)
 
 **Note:** `-i` cannot be combined with `-y` (skip confirmation) or `--dry-run`.
 
@@ -311,6 +334,8 @@ No branches were actually deleted.
 ```
 
 ### ⚙️ Configuration
+
+![deadbranch config](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/config.gif)
 
 `deadbranch` stores its configuration in `~/.deadbranch/config.toml`.
 
@@ -358,6 +383,8 @@ exclude_patterns = ["wip/*", "draft/*", "*/wip", "*/draft"]
 | `exclude-patterns` | `branches.exclude-patterns` | Glob patterns for branches to skip |
 
 ### 💾 Backup Management
+
+![deadbranch backup](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/backup.gif)
 
 Every `deadbranch clean` run automatically creates a backup. Use `deadbranch backup` to manage those backups.
 
@@ -417,6 +444,8 @@ deadbranch backup clean --repo my-repo
 ```
 
 ### 📊 Branch Statistics
+
+![deadbranch stats](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/stats.gif)
 
 Get a health overview of all branches in your repository:
 
