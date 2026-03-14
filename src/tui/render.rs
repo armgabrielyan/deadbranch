@@ -12,7 +12,7 @@ use super::app::{App, Mode};
 
 // ── Unicode characters ──────────────────────────────────────────────
 
-const CURSOR: &str = "\u{25b6}"; // ▶
+const CURSOR: &str = ">";
 const DOT: &str = "\u{00b7}"; // ·
 const BLOCK: &str = "\u{2588}"; // █
 const SHADE: &str = "\u{2591}"; // ░
