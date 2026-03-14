@@ -34,6 +34,7 @@ pub enum Commands {
     },
 
     /// Delete stale branches (merged only by default, use --force for unmerged)
+    #[command(alias = "snap")]
     Clean {
         /// Only delete branches older than N days (default: from config or 30)
         #[arg(short, long)]
