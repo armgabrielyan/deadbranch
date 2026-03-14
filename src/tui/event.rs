@@ -80,6 +80,10 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
             if let Some(branch) = app.pending_deletions.first().cloned() {
                 if branch.is_remote {
                     // All remaining are remote (locals are processed first).
+                    // Fetch and prune before remote deletion (deferred from
+                    // prepare_deletions to avoid blocking before the animation).
+                    let _ = crate::git::fetch_and_prune();
+
                     // Batch delete in a single git push for one network round-trip.
                     let remote_branches: Vec<Branch> = app.pending_deletions.drain(..).collect();
                     let names: Vec<String> =
@@ -487,11 +491,8 @@ fn prepare_deletions(app: &mut App) {
         }
     }
 
-    // Fetch and prune if any remote branches are selected
-    if !remote.is_empty() {
-        let _ = crate::git::fetch_and_prune();
-    }
-
     // Populate pending_deletions: local first, then remote
+    // Note: fetch_and_prune is deferred to the Executing phase to avoid
+    // blocking the UI before the snap animation starts.
     app.pending_deletions = local.into_iter().chain(remote).collect();
 }
