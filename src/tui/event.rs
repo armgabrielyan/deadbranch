@@ -2,6 +2,7 @@
 
 use std::io;
 use std::panic;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -63,75 +64,31 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|frame| render::draw(frame, app))?;
 
-        // Advance snap animation
+        // During Snapping: advance animation + drain background deletion results
         if app.mode == Mode::Snapping {
+            // Drain deletion results from background thread
+            if let Some(ref rx) = app.deletion_receiver {
+                while let Ok(result) = rx.try_recv() {
+                    app.deletion_results.push(result);
+                }
+            }
+
+            // Advance snap animation (gates finish on deletions being done)
+            let deletions_done =
+                app.deletion_total > 0 && app.deletion_results.len() >= app.deletion_total;
             if let Some(ref mut anim) = app.snap_animation {
                 let size = terminal.size()?;
-                anim.tick(size.width, size.height);
-                if anim.is_done() {
-                    app.snap_animation = None;
-                    app.mode = Mode::Executing;
-                }
+                anim.tick(size.width, size.height, deletions_done);
             }
-        }
 
-        // Process deletions: local one-per-frame, remote batched in one push
-        if app.mode == Mode::Executing && !app.execution_done {
-            if let Some(branch) = app.pending_deletions.first().cloned() {
-                if branch.is_remote {
-                    // All remaining are remote (locals are processed first).
-                    // Fetch and prune before remote deletion (deferred from
-                    // prepare_deletions to avoid blocking before the animation).
-                    let _ = crate::git::fetch_and_prune();
-
-                    // Batch delete in a single git push for one network round-trip.
-                    let remote_branches: Vec<Branch> = app.pending_deletions.drain(..).collect();
-                    let names: Vec<String> =
-                        remote_branches.iter().map(|b| b.name.clone()).collect();
-
-                    match crate::git::delete_remote_branches_batch(&names) {
-                        Ok(results) => {
-                            for ((_, success, error), branch) in
-                                results.into_iter().zip(remote_branches)
-                            {
-                                app.deletion_results.push(DeletionResult {
-                                    branch,
-                                    success,
-                                    error,
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            let err_msg = e.to_string();
-                            for branch in remote_branches {
-                                app.deletion_results.push(DeletionResult {
-                                    branch,
-                                    success: false,
-                                    error: Some(err_msg.clone()),
-                                });
-                            }
-                        }
-                    }
-                } else {
-                    // Local: delete one per frame for progressive UI
-                    app.pending_deletions.remove(0);
-                    let result = crate::git::delete_local_branch(&branch.name, app.force);
-                    app.deletion_results.push(DeletionResult {
-                        branch,
-                        success: result.is_ok(),
-                        error: result.err().map(|e| e.to_string()),
-                    });
-                }
+            // Transition to Summary when animation reaches Done
+            let anim_done = app.snap_animation.as_ref().is_none_or(|a| a.is_done());
+            if anim_done {
+                app.snap_animation = None;
+                app.deletion_receiver = None;
+                app.mode = Mode::Summary;
+                continue;
             }
-            if app.pending_deletions.is_empty() {
-                app.execution_done = true;
-            }
-        }
-
-        // Transition from Executing to Summary when done
-        if app.mode == Mode::Executing && app.execution_done {
-            app.mode = Mode::Summary;
-            continue;
         }
 
         // Wait for the first event, then drain any already-queued events
@@ -153,8 +110,9 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
                         && key.code == KeyCode::Char('c')
                     {
                         if app.mode == Mode::Snapping {
+                            // Skip animation but stay in Snapping until
+                            // background deletions finish
                             app.snap_animation = None;
-                            app.mode = Mode::Executing;
                         } else {
                             return Ok(());
                         }
@@ -175,9 +133,6 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
                         }
                         Mode::Snapping => {
                             // All input ignored during animation (Ctrl+C handled above)
-                        }
-                        Mode::Executing => {
-                            // No input during execution
                         }
                         Mode::Summary => {
                             if key.code == KeyCode::Esc {
@@ -373,17 +328,20 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent) -> bool {
                     prepare_deletions(app);
                     app.snap_animation =
                         Some(super::snap::SnapAnimation::new(collect_snap_cells(app)));
+                    start_background_deletions(app);
                     app.mode = Mode::Snapping;
                 }
             } else {
                 prepare_deletions(app);
                 app.snap_animation = Some(super::snap::SnapAnimation::new(collect_snap_cells(app)));
+                start_background_deletions(app);
                 app.mode = Mode::Snapping;
             }
         }
         KeyCode::Char('y') if !app.requires_strict_confirm() => {
             prepare_deletions(app);
             app.snap_animation = Some(super::snap::SnapAnimation::new(collect_snap_cells(app)));
+            start_background_deletions(app);
             app.mode = Mode::Snapping;
         }
         KeyCode::Char(c) if app.requires_strict_confirm() => {
@@ -465,6 +423,59 @@ fn collect_snap_cells(app: &App) -> Vec<(usize, Vec<(char, ratatui::style::Color
             (idx, chars)
         })
         .collect()
+}
+
+/// Spawn a background thread to process all pending deletions.
+/// Results are sent back via a channel polled each frame during Snapping.
+fn start_background_deletions(app: &mut App) {
+    let branches: Vec<Branch> = app.pending_deletions.drain(..).collect();
+    let force = app.force;
+    app.deletion_total = branches.len();
+
+    let (tx, rx) = mpsc::channel();
+    app.deletion_receiver = Some(rx);
+
+    std::thread::spawn(move || {
+        let local: Vec<_> = branches.iter().filter(|b| !b.is_remote).cloned().collect();
+        let remote: Vec<_> = branches.iter().filter(|b| b.is_remote).cloned().collect();
+
+        // Delete local branches one by one
+        for branch in local {
+            let result = crate::git::delete_local_branch(&branch.name, force);
+            let _ = tx.send(DeletionResult {
+                branch,
+                success: result.is_ok(),
+                error: result.err().map(|e| e.to_string()),
+            });
+        }
+
+        // Remote branches: fetch/prune then batch delete
+        if !remote.is_empty() {
+            let _ = crate::git::fetch_and_prune();
+            let names: Vec<String> = remote.iter().map(|b| b.name.clone()).collect();
+            match crate::git::delete_remote_branches_batch(&names) {
+                Ok(results) => {
+                    for ((_, success, error), branch) in results.into_iter().zip(remote) {
+                        let _ = tx.send(DeletionResult {
+                            branch,
+                            success,
+                            error,
+                        });
+                    }
+                }
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    for branch in remote {
+                        let _ = tx.send(DeletionResult {
+                            branch,
+                            success: false,
+                            error: Some(err_msg.clone()),
+                        });
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Prepare for incremental deletion: collect selected branches (local first,

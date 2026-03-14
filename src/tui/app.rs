@@ -1,5 +1,7 @@
 //! Core state management for the TUI
 
+use std::sync::mpsc;
+
 use ratatui::widgets::TableState;
 
 use crate::branch::{Branch, BranchFilter};
@@ -15,10 +17,8 @@ pub enum Mode {
     Filter,
     /// Confirming deletion
     Confirm,
-    /// Snap animation playing (non-interactive)
+    /// Snap animation playing + background deletions (non-interactive)
     Snapping,
-    /// Executing deletions
-    Executing,
     /// Showing results summary
     Summary,
 }
@@ -125,8 +125,6 @@ pub struct App {
     pub deletion_results: Vec<DeletionResult>,
     /// Path to the backup file created before deletion
     pub backup_path: Option<String>,
-    /// Whether execution has finished
-    pub execution_done: bool,
     /// Whether the help overlay is shown
     pub show_help: bool,
     /// Table state for the branch list (manages scroll offset)
@@ -143,6 +141,10 @@ pub struct App {
     pub snap_animation: Option<super::snap::SnapAnimation>,
     /// Mapping of branch_index → screen Y, populated during render
     pub branch_screen_positions: Vec<(usize, u16)>,
+    /// Channel receiver for background deletion results
+    pub deletion_receiver: Option<mpsc::Receiver<DeletionResult>>,
+    /// Total number of branches being deleted (for progress tracking)
+    pub deletion_total: usize,
 }
 
 impl App {
@@ -175,7 +177,6 @@ impl App {
             confirm_input: String::new(),
             deletion_results: Vec::new(),
             backup_path: None,
-            execution_done: false,
             show_help: false,
             table_state: TableState::default(),
             pending_deletions: Vec::new(),
@@ -184,6 +185,8 @@ impl App {
             table_visible_rows: 0,
             snap_animation: None,
             branch_screen_positions: Vec::new(),
+            deletion_receiver: None,
+            deletion_total: 0,
             all_branches,
         };
 
@@ -463,7 +466,8 @@ impl App {
         self.deletion_results.clear();
         self.pending_deletions.clear();
         self.backup_path = None;
-        self.execution_done = false;
+        self.deletion_receiver = None;
+        self.deletion_total = 0;
         self.confirm_input.clear();
 
         // Refresh visible list and fix cursor

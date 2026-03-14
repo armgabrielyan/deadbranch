@@ -251,7 +251,12 @@ impl SnapAnimation {
         }
     }
 
-    pub fn tick(&mut self, screen_width: u16, screen_height: u16) {
+    /// Advance the animation by one frame.
+    ///
+    /// `can_finish` gates the Settle → Done transition: the animation will
+    /// stay in the Settle phase (keeping particles alive) until the caller
+    /// signals that background work (e.g. branch deletions) is complete.
+    pub fn tick(&mut self, screen_width: u16, screen_height: u16, can_finish: bool) {
         let elapsed = self.start.elapsed();
 
         match self.phase {
@@ -286,7 +291,7 @@ impl SnapAnimation {
                     .map(|s| s.elapsed())
                     .unwrap_or(Duration::ZERO);
 
-                if self.particles.is_empty() || settle_elapsed >= SETTLE_DURATION {
+                if can_finish && (self.particles.is_empty() || settle_elapsed >= SETTLE_DURATION) {
                     self.phase = SnapPhase::Done;
                 }
             }
@@ -452,12 +457,12 @@ mod tests {
 
         // Flash phase requires real wall-clock time (200ms)
         std::thread::sleep(Duration::from_millis(250));
-        anim.tick(80, 24);
+        anim.tick(80, 24, true);
         assert_eq!(anim.phase, SnapPhase::Dissolve);
 
         // Dissolve: tick many times; rows are short ("ab") so dissolve quickly
         for _ in 0..500 {
-            anim.tick(80, 24);
+            anim.tick(80, 24, true);
             if anim.phase != SnapPhase::Dissolve {
                 break;
             }
@@ -471,7 +476,7 @@ mod tests {
         // Settle requires 500ms or particles to clear
         std::thread::sleep(Duration::from_millis(550));
         for _ in 0..100 {
-            anim.tick(80, 24);
+            anim.tick(80, 24, true);
             if anim.is_done() {
                 break;
             }
@@ -496,7 +501,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2000));
 
         for _ in 0..1000 {
-            anim.tick(80, 24);
+            anim.tick(80, 24, true);
             if anim.is_done() {
                 break;
             }

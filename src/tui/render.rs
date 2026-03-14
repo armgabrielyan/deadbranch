@@ -128,7 +128,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Mode::Browse | Mode::Filter | Mode::VisualSelect => draw_browse(frame, app),
         Mode::Confirm => draw_confirm(frame, app),
         Mode::Snapping => draw_snapping(frame, app),
-        Mode::Executing => draw_executing(frame, app),
         Mode::Summary => draw_summary(frame, app),
     }
 
@@ -600,19 +599,41 @@ fn draw_snapping(frame: &mut Frame, app: &mut App) {
     draw_header(frame, app, chunks[0]);
     draw_branch_list(frame, app, chunks[2]);
 
-    // Status bar: show "Snapping..." message
+    // Status bar: show deletion progress gauge
     let block = Block::default().borders(Borders::TOP);
     let inner = block.inner(chunks[3]);
     frame.render_widget(block, chunks[3]);
     if inner.height >= 1 {
-        let snap_msg = Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled(
-                "Snapping...",
-                Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
-            ),
-        ]);
-        frame.render_widget(Paragraph::new(snap_msg), inner);
+        let total = app.deletion_total;
+        let completed = app.deletion_results.len();
+        let ratio = if total > 0 {
+            (completed as f64 / total as f64).min(1.0)
+        } else {
+            0.0
+        };
+
+        let status_chunks = Layout::vertical([
+            Constraint::Length(1), // gauge
+            Constraint::Min(0),    // remaining space
+        ])
+        .split(inner);
+
+        // Center the gauge at ~40% of screen width
+        let gauge_width = (status_chunks[0].width * 2 / 5).max(20);
+        let gauge_area = Layout::horizontal([
+            Constraint::Min(0),
+            Constraint::Length(gauge_width),
+            Constraint::Min(0),
+        ])
+        .split(status_chunks[0])[1];
+
+        let label = format!(" Snapping {}/{} ", completed, total);
+        let gauge = Gauge::default()
+            .gauge_style(Style::default().fg(CYAN))
+            .ratio(ratio)
+            .label(Span::styled(label, Style::default().fg(WHITE)))
+            .use_unicode(true);
+        frame.render_widget(gauge, gauge_area);
     }
 
     // Capture actual screen positions from the buffer on first frame.
@@ -708,7 +729,21 @@ fn draw_snapping(frame: &mut Frame, app: &mut App) {
                     }
                 }
             }
-            super::snap::SnapPhase::Done => {}
+            super::snap::SnapPhase::Done => {
+                // Blank out dissolved rows so the table doesn't flash back
+                for row in &anim.rows {
+                    if row.x_positions.is_empty() {
+                        continue;
+                    }
+                    let y = row.screen_y;
+                    if y >= area.y + area.height {
+                        continue;
+                    }
+                    for x in area.x..area.x + area.width {
+                        buf[(x, y)].set_char(' ');
+                    }
+                }
+            }
         }
     }
 }
@@ -878,103 +913,6 @@ fn draw_confirm(frame: &mut Frame, app: &App) {
         vec![("Enter/y", "confirm"), ("Esc", "back")]
     };
     draw_footer_hints(frame, footer_area, hints);
-}
-
-// ── Executing mode ──────────────────────────────────────────────────
-
-fn draw_executing(frame: &mut Frame, app: &App) {
-    let area = frame.area();
-    let total = app.selected_count();
-    let completed = app.deletion_results.len();
-
-    // Use most of the terminal height (capped by centered_dialog)
-    let content_height = area.height.saturating_sub(6);
-
-    let dialog = centered_dialog(area, content_height);
-    frame.render_widget(Clear, dialog);
-
-    let block = Block::default()
-        .title(" Deleting Branches ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(CYAN));
-    let inner = block.inner(dialog);
-    frame.render_widget(block, dialog);
-
-    // Split: content area on top, gauge at bottom
-    let chunks = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(inner);
-    let content_area = chunks[0];
-    let gauge_area = chunks[1];
-
-    let mut lines: Vec<Line> = Vec::new();
-
-    let backup_lines: u16 = if app.backup_path.is_some() { 2 } else { 0 };
-    if let Some(ref path) = app.backup_path {
-        lines.push(Line::from(Span::styled(
-            format!("  Backup: {}", path),
-            Style::default().fg(GRAY),
-        )));
-        lines.push(Line::from(""));
-    }
-
-    // Show only the tail of results that fit the content area,
-    // so the list scrolls like a log during large deletions.
-    let max_result_lines = content_area.height.saturating_sub(backup_lines + 1) as usize; // +1 for pending line
-    let skip = app.deletion_results.len().saturating_sub(max_result_lines);
-    if skip > 0 {
-        lines.push(Line::from(Span::styled(
-            format!("  ... {} more above", skip),
-            Style::default().fg(GRAY),
-        )));
-    }
-    for result in app.deletion_results.iter().skip(skip) {
-        let (icon, color) = if result.success {
-            (CHECK, GREEN)
-        } else {
-            (CROSS, RED)
-        };
-        let mut spans = vec![
-            Span::styled(format!("  {} ", icon), Style::default().fg(color)),
-            Span::styled(&result.branch.name, Style::default().fg(WHITE)),
-        ];
-        if let Some(ref err) = result.error {
-            spans.push(Span::styled(format!("  {}", err), Style::default().fg(RED)));
-        }
-        lines.push(Line::from(spans));
-    }
-
-    // Show pending branches with dimmed style
-    let pending_count = total.saturating_sub(completed);
-    if pending_count > 0 {
-        lines.push(Line::from(Span::styled(
-            format!("  {} deleting...", DOT),
-            Style::default().fg(GRAY),
-        )));
-    }
-
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, content_area);
-
-    // Progress gauge
-    let ratio = if total > 0 {
-        completed as f64 / total as f64
-    } else {
-        0.0
-    };
-    let gauge_label = Span::styled(
-        format!(" {}/{} ", completed, total),
-        Style::default().fg(WHITE),
-    );
-    let gauge = Gauge::default()
-        .gauge_style(Style::default().fg(CYAN))
-        .ratio(ratio)
-        .label(gauge_label)
-        .use_unicode(true);
-    frame.render_widget(gauge, gauge_area);
 }
 
 // ── Summary mode ────────────────────────────────────────────────────
