@@ -63,12 +63,25 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|frame| render::draw(frame, app))?;
 
+        // Advance snap animation
+        if app.mode == Mode::Snapping {
+            if let Some(ref mut anim) = app.snap_animation {
+                let size = terminal.size()?;
+                let table_area_y = 2_u16; // header + spacer
+                let row_y: Vec<u16> = (0..anim.rows.len())
+                    .map(|i| (table_area_y + 2 + i as u16).min(size.height.saturating_sub(1)))
+                    .collect();
+                let table_x = (size.width * 15 / 100).max(1);
+                anim.tick(size.width, size.height, &row_y, table_x);
+                if anim.is_done() {
+                    app.snap_animation = None;
+                    app.mode = Mode::Executing;
+                }
+            }
+        }
+
         // Process deletions: local one-per-frame, remote batched in one push
         if app.mode == Mode::Executing && !app.execution_done {
-            if app.pending_deletions.is_empty() && app.deletion_results.is_empty() {
-                // First frame: create backup and populate pending_deletions
-                prepare_deletions(app);
-            }
             if let Some(branch) = app.pending_deletions.first().cloned() {
                 if branch.is_remote {
                     // All remaining are remote (locals are processed first).
@@ -125,17 +138,27 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
         // Wait for the first event, then drain any already-queued events
         // without blocking. This prevents mouse scroll flooding while keeping
         // keyboard input responsive (no lag on key repeat).
-        if !event::poll(Duration::from_millis(100))? {
+        let poll_timeout = if app.mode == Mode::Snapping {
+            Duration::from_millis(33) // ~30fps
+        } else {
+            Duration::from_millis(100)
+        };
+        if !event::poll(poll_timeout)? {
             continue;
         }
         loop {
             match event::read()? {
                 Event::Key(key) => {
-                    // Ctrl+C always exits
+                    // Ctrl+C: skip animation during Snapping, exit otherwise
                     if key.modifiers.contains(KeyModifiers::CONTROL)
                         && key.code == KeyCode::Char('c')
                     {
-                        return Ok(());
+                        if app.mode == Mode::Snapping {
+                            app.snap_animation = None;
+                            app.mode = Mode::Executing;
+                        } else {
+                            return Ok(());
+                        }
                     }
 
                     match app.mode {
@@ -150,6 +173,9 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
                             if handle_confirm_key(app, key) {
                                 return Ok(());
                             }
+                        }
+                        Mode::Snapping => {
+                            // All input ignored during animation (Ctrl+C handled above)
                         }
                         Mode::Executing => {
                             // No input during execution
@@ -345,14 +371,21 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent) -> bool {
         KeyCode::Enter => {
             if app.requires_strict_confirm() {
                 if app.confirm_input == "yes" {
-                    app.mode = Mode::Executing;
+                    prepare_deletions(app);
+                    app.snap_animation =
+                        Some(super::snap::SnapAnimation::new(collect_snap_cells(app)));
+                    app.mode = Mode::Snapping;
                 }
             } else {
-                app.mode = Mode::Executing;
+                prepare_deletions(app);
+                app.snap_animation = Some(super::snap::SnapAnimation::new(collect_snap_cells(app)));
+                app.mode = Mode::Snapping;
             }
         }
         KeyCode::Char('y') if !app.requires_strict_confirm() => {
-            app.mode = Mode::Executing;
+            prepare_deletions(app);
+            app.snap_animation = Some(super::snap::SnapAnimation::new(collect_snap_cells(app)));
+            app.mode = Mode::Snapping;
         }
         KeyCode::Char(c) if app.requires_strict_confirm() => {
             app.confirm_input.push(c);
@@ -364,6 +397,75 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent) -> bool {
     }
 
     false
+}
+
+/// Collect rendered characters for each selected branch row.
+fn collect_snap_cells(app: &App) -> Vec<(usize, Vec<(char, ratatui::style::Color)>)> {
+    use crate::branch::AgeSeverity;
+    use ratatui::style::Color;
+
+    app.visible
+        .iter()
+        .filter(|&&idx| app.selected[idx])
+        .map(|&idx| {
+            let branch = &app.all_branches[idx];
+            let mut chars: Vec<(char, Color)> = Vec::new();
+
+            // Branch name
+            for ch in branch.name.chars().take(60) {
+                chars.push((ch, Color::White));
+            }
+
+            // Age
+            chars.push((' ', Color::DarkGray));
+            let age_str = format!("{}d", branch.age_days);
+            let age_color = match AgeSeverity::from_days(branch.age_days) {
+                AgeSeverity::Fresh => Color::Green,
+                AgeSeverity::Moderate => Color::Yellow,
+                AgeSeverity::Stale => Color::Red,
+            };
+            for ch in age_str.chars() {
+                chars.push((ch, age_color));
+            }
+
+            // Status
+            chars.push((' ', Color::DarkGray));
+            let (status_text, status_color) = if branch.is_merged {
+                ("merged", Color::Green)
+            } else {
+                ("unmerged", Color::Yellow)
+            };
+            for ch in status_text.chars() {
+                chars.push((ch, status_color));
+            }
+
+            // Type
+            chars.push((' ', Color::DarkGray));
+            let (type_text, type_color) = if branch.is_remote {
+                ("remote", Color::Blue)
+            } else {
+                ("local", Color::Cyan)
+            };
+            for ch in type_text.chars() {
+                chars.push((ch, type_color));
+            }
+
+            // Date
+            chars.push((' ', Color::DarkGray));
+            let date_str = branch.last_commit_date.format("%Y-%m-%d").to_string();
+            for ch in date_str.chars() {
+                chars.push((ch, Color::DarkGray));
+            }
+
+            // Author
+            chars.push((' ', Color::DarkGray));
+            for ch in branch.last_commit_author.chars() {
+                chars.push((ch, Color::White));
+            }
+
+            (idx, chars)
+        })
+        .collect()
 }
 
 /// Prepare for incremental deletion: collect selected branches (local first,
