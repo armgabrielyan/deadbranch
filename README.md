@@ -42,7 +42,7 @@
 
 ## Demo
 
-![deadbranch list](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/list.gif)
+![deadbranch snap](https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/demo/snap.gif)
 
 ## ✨ Features
 
@@ -308,7 +308,7 @@ deadbranch clean -i [OPTIONS]
 - **Fuzzy search** — `/` opens search with matched characters highlighted
 - **Age coloring** — Green (<30d), yellow (31–90d), red (>90d)
 - **Sections** — Merged and unmerged branches are visually grouped with section headers
-- **Progressive deletion** — Live progress bar during batch deletion
+- **Snap dissolution** — Thanos-style particle animation on deletion with a live progress gauge; branches are deleted in the background while the animation plays
 - **Smart confirmation** — Simple confirm for safe deletions, typed `yes` for risky ones (unmerged/remote)
 
 **Note:** `-i` cannot be combined with `-y` (skip confirmation) or `--dry-run`.
