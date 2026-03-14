@@ -15,6 +15,8 @@ pub enum Mode {
     Filter,
     /// Confirming deletion
     Confirm,
+    /// Snap animation playing (non-interactive)
+    Snapping,
     /// Executing deletions
     Executing,
     /// Showing results summary
@@ -137,6 +139,8 @@ pub struct App {
     pub visual_anchor: usize,
     /// Number of branch rows visible in the table viewport (set during render)
     pub table_visible_rows: usize,
+    /// Active snap animation (present only during Snapping mode)
+    pub snap_animation: Option<super::snap::SnapAnimation>,
 }
 
 impl App {
@@ -176,6 +180,7 @@ impl App {
             pending_g: false,
             visual_anchor: 0,
             table_visible_rows: 0,
+            snap_animation: None,
             all_branches,
         };
 

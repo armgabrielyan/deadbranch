@@ -127,6 +127,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     match app.mode {
         Mode::Browse | Mode::Filter | Mode::VisualSelect => draw_browse(frame, app),
         Mode::Confirm => draw_confirm(frame, app),
+        Mode::Snapping => draw_snapping(frame, app),
         Mode::Executing => draw_executing(frame, app),
         Mode::Summary => draw_summary(frame, app),
     }
@@ -563,6 +564,109 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ))
     };
     frame.render_widget(Paragraph::new(selection_line), lines_area[1]);
+}
+
+// ── Snapping mode ───────────────────────────────────────────────────
+
+fn draw_snapping(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+
+    let chunks = Layout::vertical([
+        Constraint::Length(1), // header
+        Constraint::Length(1), // spacer
+        Constraint::Min(1),    // branch list
+        Constraint::Length(3), // status bar
+    ])
+    .split(area);
+
+    draw_header(frame, app, chunks[0]);
+    draw_branch_list(frame, app, chunks[2]);
+
+    // Status bar: show "Snapping..." message
+    let block = Block::default().borders(Borders::TOP);
+    let inner = block.inner(chunks[3]);
+    frame.render_widget(block, chunks[3]);
+    if inner.height >= 1 {
+        let snap_msg = Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                "Snapping...",
+                Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(snap_msg), inner);
+    }
+
+    // Apply phase-specific effects to the buffer
+    if let Some(ref anim) = app.snap_animation {
+        let buf = frame.buffer_mut();
+        match anim.phase {
+            super::snap::SnapPhase::Flash => {
+                // Tint entire screen
+                for y in area.y..area.y + area.height {
+                    for x in area.x..area.x + area.width {
+                        let cell = &mut buf[(x, y)];
+                        cell.set_fg(GRAY);
+                        cell.set_bg(Color::Indexed(236));
+                    }
+                }
+            }
+            super::snap::SnapPhase::Dissolve | super::snap::SnapPhase::Settle => {
+                // Overlay dissolving cell states onto the buffer
+                let table_area = chunks[2];
+                let table_width = (table_area.width * 7 / 10).max(60);
+                let margin = (table_area.width.saturating_sub(table_width)) / 2;
+                let table_x = table_area.x + margin;
+
+                for row in &anim.rows {
+                    // Find the screen Y for this branch
+                    if let Some(vis_pos) =
+                        app.visible.iter().position(|&idx| idx == row.branch_index)
+                    {
+                        // Approximate Y: table header(1) + hr(1) + row offset
+                        let approx_y = table_area.y + 2 + vis_pos as u16;
+                        if approx_y >= area.y + area.height {
+                            continue;
+                        }
+
+                        for (i, cell_state) in row.cell_states.iter().enumerate() {
+                            let x = table_x + 6 + i as u16; // +6 for selector+linenum+sep
+                            if x >= area.x + area.width {
+                                break;
+                            }
+                            match cell_state.render() {
+                                Some((ch, color)) => {
+                                    let cell = &mut buf[(x, approx_y)];
+                                    cell.set_char(ch);
+                                    cell.set_fg(color);
+                                }
+                                None => {
+                                    let cell = &mut buf[(x, approx_y)];
+                                    cell.set_char(' ');
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Overlay free-floating particles
+                for p in &anim.particles.particles {
+                    let px = p.x as u16;
+                    let py = p.y as u16;
+                    if px >= area.x
+                        && px < area.x + area.width
+                        && py >= area.y
+                        && py < area.y + area.height
+                    {
+                        let cell = &mut buf[(px, py)];
+                        cell.set_char(p.char());
+                        cell.set_fg(p.color);
+                    }
+                }
+            }
+            super::snap::SnapPhase::Done => {}
+        }
+    }
 }
 
 // ── Confirm mode ────────────────────────────────────────────────────

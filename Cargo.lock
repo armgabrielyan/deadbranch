@@ -367,6 +367,7 @@ dependencies = [
  "crossterm 0.28.1",
  "dialoguer",
  "dirs",
+ "fastrand",
  "indicatif",
  "predicates",
  "ratatui",

@@ -2,7 +2,9 @@
 
 mod app;
 mod event;
+mod particles;
 mod render;
+mod snap;
 
 use anyhow::Result;
 
