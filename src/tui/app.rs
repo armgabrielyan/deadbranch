@@ -141,6 +141,8 @@ pub struct App {
     pub table_visible_rows: usize,
     /// Active snap animation (present only during Snapping mode)
     pub snap_animation: Option<super::snap::SnapAnimation>,
+    /// Mapping of branch_index → screen Y, populated during render
+    pub branch_screen_positions: Vec<(usize, u16)>,
 }
 
 impl App {
@@ -181,6 +183,7 @@ impl App {
             visual_anchor: 0,
             table_visible_rows: 0,
             snap_animation: None,
+            branch_screen_positions: Vec::new(),
             all_branches,
         };
 

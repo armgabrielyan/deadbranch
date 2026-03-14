@@ -114,6 +114,10 @@ pub struct RowDissolve {
     dissolve_order: Vec<usize>,
     next_dissolve: usize,
     started: bool,
+    /// Actual screen Y coordinate (populated during first render)
+    pub screen_y: u16,
+    /// Actual screen X coordinate per cell (populated during first render)
+    pub x_positions: Vec<u16>,
 }
 
 impl RowDissolve {
@@ -137,6 +141,8 @@ impl RowDissolve {
             dissolve_order: order,
             next_dissolve: 0,
             started: false,
+            screen_y: 0,
+            x_positions: Vec::new(),
         }
     }
 
@@ -179,6 +185,27 @@ impl RowDissolve {
         spawn_positions
     }
 
+    /// Reinitialize this row's cells from actual buffer content.
+    /// Called once after the first render to capture real screen positions.
+    pub fn capture_from_screen(&mut self, screen_y: u16, cells: Vec<(u16, char, Color)>) {
+        self.screen_y = screen_y;
+        self.x_positions = cells.iter().map(|&(x, _, _)| x).collect();
+        self.cell_states = cells
+            .iter()
+            .map(|&(_, ch, color)| CellState::Normal { ch, color })
+            .collect();
+
+        // Rebuild dissolve order with left-to-right bias
+        let len = self.cell_states.len();
+        let mut order: Vec<usize> = (0..len).collect();
+        order.sort_by_cached_key(|&i| {
+            let bias = (i as f32 / len.max(1) as f32 * 50.0) as i32;
+            (fastrand::i32(0..100)) - bias
+        });
+        self.dissolve_order = order;
+        self.next_dissolve = 0;
+    }
+
     #[cfg(test)]
     pub fn has_started(&self) -> bool {
         self.started
@@ -191,6 +218,8 @@ pub struct SnapAnimation {
     pub rows: Vec<RowDissolve>,
     pub particles: ParticleSystem,
     settle_start: Option<Instant>,
+    /// Whether screen positions have been captured from the buffer
+    pub captured: bool,
 }
 
 impl SnapAnimation {
@@ -218,16 +247,11 @@ impl SnapAnimation {
             rows,
             particles: ParticleSystem::new(),
             settle_start: None,
+            captured: false,
         }
     }
 
-    pub fn tick(
-        &mut self,
-        screen_width: u16,
-        screen_height: u16,
-        row_y_positions: &[u16],
-        table_x_offset: u16,
-    ) {
+    pub fn tick(&mut self, screen_width: u16, screen_height: u16) {
         let elapsed = self.start.elapsed();
 
         match self.phase {
@@ -239,15 +263,11 @@ impl SnapAnimation {
             SnapPhase::Dissolve => {
                 let dissolve_elapsed = elapsed - FLASH_DURATION;
 
-                for (row_idx, row) in self.rows.iter_mut().enumerate() {
+                for row in self.rows.iter_mut() {
                     let spawn_positions = row.tick(dissolve_elapsed);
-                    let y = row_y_positions.get(row_idx).copied().unwrap_or(0);
-                    for (x_offset, color) in spawn_positions {
-                        self.particles.spawn(
-                            (table_x_offset as usize + x_offset) as f32,
-                            y as f32,
-                            color,
-                        );
+                    for (cell_idx, color) in spawn_positions {
+                        let x = row.x_positions.get(cell_idx).copied().unwrap_or(0);
+                        self.particles.spawn(x as f32, row.screen_y as f32, color);
                     }
                 }
 
@@ -432,12 +452,12 @@ mod tests {
 
         // Flash phase requires real wall-clock time (200ms)
         std::thread::sleep(Duration::from_millis(250));
-        anim.tick(80, 24, &[10], 5);
+        anim.tick(80, 24);
         assert_eq!(anim.phase, SnapPhase::Dissolve);
 
         // Dissolve: tick many times; rows are short ("ab") so dissolve quickly
         for _ in 0..500 {
-            anim.tick(80, 24, &[10], 5);
+            anim.tick(80, 24);
             if anim.phase != SnapPhase::Dissolve {
                 break;
             }
@@ -451,7 +471,7 @@ mod tests {
         // Settle requires 500ms or particles to clear
         std::thread::sleep(Duration::from_millis(550));
         for _ in 0..100 {
-            anim.tick(80, 24, &[10], 5);
+            anim.tick(80, 24);
             if anim.is_done() {
                 break;
             }
@@ -476,7 +496,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2000));
 
         for _ in 0..1000 {
-            anim.tick(80, 24, &[10, 12], 5);
+            anim.tick(80, 24);
             if anim.is_done() {
                 break;
             }

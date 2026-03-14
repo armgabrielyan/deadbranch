@@ -257,6 +257,8 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut rows: Vec<Row> = Vec::new();
     let mut cursor_table_row: usize = 0;
     let mut last_was_merged: Option<bool> = None;
+    // Track branch_index → table row index (before hr_row insertion)
+    let mut branch_row_map: Vec<(usize, usize)> = Vec::new();
 
     for (row_idx, &branch_idx) in app.visible.iter().enumerate() {
         let branch = &app.all_branches[branch_idx];
@@ -403,6 +405,7 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
             row = row.style(Style::default().bg(Color::Indexed(236)));
         }
 
+        branch_row_map.push((branch_idx, rows.len()));
         rows.push(row);
     }
 
@@ -473,6 +476,21 @@ fn draw_branch_list(frame: &mut Frame, app: &mut App, area: Rect) {
         *app.table_state.offset_mut() = cursor_table_row.saturating_sub(2);
     }
     frame.render_stateful_widget(table, area, &mut app.table_state);
+
+    // Populate branch_screen_positions for snap animation.
+    // After hr_row insertion at index 0, all row indices shifted by +1.
+    // The table header takes 1 row, so data row at index `i` is at y = area.y + 1 + (i - offset).
+    let final_offset = app.table_state.offset();
+    app.branch_screen_positions.clear();
+    for &(branch_idx, pre_hr_idx) in &branch_row_map {
+        let data_row_idx = pre_hr_idx + 1; // +1 for hr_row insertion
+        if data_row_idx >= final_offset {
+            let y = area.y + 1 + (data_row_idx - final_offset) as u16;
+            if y < area.y + area.height {
+                app.branch_screen_positions.push((branch_idx, y));
+            }
+        }
+    }
 }
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -597,6 +615,38 @@ fn draw_snapping(frame: &mut Frame, app: &mut App) {
         frame.render_widget(Paragraph::new(snap_msg), inner);
     }
 
+    // Capture actual screen positions from the buffer on first frame.
+    // This must happen after draw_branch_list which populates branch_screen_positions.
+    if let Some(ref mut anim) = app.snap_animation {
+        if !anim.captured {
+            let table_area = chunks[2];
+            let buf = frame.buffer_mut();
+
+            for row in anim.rows.iter_mut() {
+                if let Some(&(_, screen_y)) = app
+                    .branch_screen_positions
+                    .iter()
+                    .find(|&&(bidx, _)| bidx == row.branch_index)
+                {
+                    if screen_y < area.y + area.height {
+                        // Scan buffer at this Y, capturing non-space characters
+                        // from the name column onward (skip selector + linenum + sep)
+                        let mut cells: Vec<(u16, char, Color)> = Vec::new();
+                        for x in table_area.x..table_area.x + table_area.width {
+                            let bcell = &buf[(x, screen_y)];
+                            let ch = bcell.symbol().chars().next().unwrap_or(' ');
+                            if ch != ' ' {
+                                cells.push((x, ch, bcell.fg));
+                            }
+                        }
+                        row.capture_from_screen(screen_y, cells);
+                    }
+                }
+            }
+            anim.captured = true;
+        }
+    }
+
     // Apply phase-specific effects to the buffer
     if let Some(ref anim) = app.snap_animation {
         let buf = frame.buffer_mut();
@@ -612,38 +662,32 @@ fn draw_snapping(frame: &mut Frame, app: &mut App) {
                 }
             }
             super::snap::SnapPhase::Dissolve | super::snap::SnapPhase::Settle => {
-                // Overlay dissolving cell states onto the buffer
-                let table_area = chunks[2];
-                let table_width = (table_area.width * 7 / 10).max(60);
-                let margin = (table_area.width.saturating_sub(table_width)) / 2;
-                let table_x = table_area.x + margin;
-
                 for row in &anim.rows {
-                    // Find the screen Y for this branch
-                    if let Some(vis_pos) =
-                        app.visible.iter().position(|&idx| idx == row.branch_index)
-                    {
-                        // Approximate Y: table header(1) + hr(1) + row offset
-                        let approx_y = table_area.y + 2 + vis_pos as u16;
-                        if approx_y >= area.y + area.height {
-                            continue;
-                        }
+                    if row.x_positions.is_empty() {
+                        continue;
+                    }
+                    let y = row.screen_y;
+                    if y >= area.y + area.height {
+                        continue;
+                    }
 
-                        for (i, cell_state) in row.cell_states.iter().enumerate() {
-                            let x = table_x + 6 + i as u16; // +6 for selector+linenum+sep
-                            if x >= area.x + area.width {
-                                break;
+                    for (i, cell_state) in row.cell_states.iter().enumerate() {
+                        let x = match row.x_positions.get(i) {
+                            Some(&x) => x,
+                            None => break,
+                        };
+                        if x >= area.x + area.width {
+                            break;
+                        }
+                        match cell_state.render() {
+                            Some((ch, color)) => {
+                                let cell = &mut buf[(x, y)];
+                                cell.set_char(ch);
+                                cell.set_fg(color);
                             }
-                            match cell_state.render() {
-                                Some((ch, color)) => {
-                                    let cell = &mut buf[(x, approx_y)];
-                                    cell.set_char(ch);
-                                    cell.set_fg(color);
-                                }
-                                None => {
-                                    let cell = &mut buf[(x, approx_y)];
-                                    cell.set_char(' ');
-                                }
+                            None => {
+                                let cell = &mut buf[(x, y)];
+                                cell.set_char(' ');
                             }
                         }
                     }

@@ -67,12 +67,7 @@ fn run_loop(terminal: &mut Term, app: &mut App) -> Result<()> {
         if app.mode == Mode::Snapping {
             if let Some(ref mut anim) = app.snap_animation {
                 let size = terminal.size()?;
-                let table_area_y = 2_u16; // header + spacer
-                let row_y: Vec<u16> = (0..anim.rows.len())
-                    .map(|i| (table_area_y + 2 + i as u16).min(size.height.saturating_sub(1)))
-                    .collect();
-                let table_x = (size.width * 15 / 100).max(1);
-                anim.tick(size.width, size.height, &row_y, table_x);
+                anim.tick(size.width, size.height);
                 if anim.is_done() {
                     app.snap_animation = None;
                     app.mode = Mode::Executing;
