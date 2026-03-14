@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/armgabrielyan/deadbranch/compare/v0.2.1...v0.3.0) (2026-03-14)
+
+
+### Features
+
+* **tui:** add Thanos snap dissolution animation on deletion ([#16](https://github.com/armgabrielyan/deadbranch/issues/16)) ([5e6dd3e](https://github.com/armgabrielyan/deadbranch/commit/5e6dd3e9225823fccc0067fed01e4b4008029e16))
+
 ## [0.2.1](https://github.com/armgabrielyan/deadbranch/compare/v0.2.0...v0.2.1) (2026-03-14)
 
 
