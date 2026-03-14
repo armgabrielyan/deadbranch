@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/armgabrielyan/deadbranch/compare/v0.2.0...v0.2.1) (2026-03-14)
+
+
+### Bug Fixes
+
+* **tui:** filter KeyEventKind::Press to avoid duplicate key events ([#14](https://github.com/armgabrielyan/deadbranch/issues/14)) ([14437ad](https://github.com/armgabrielyan/deadbranch/commit/14437ad89fabad9fbc4c0c42873f24e8393c3e59))
+
 ## [0.2.0](https://github.com/armgabrielyan/deadbranch/compare/v0.1.4...v0.2.0) (2026-03-09)
 
 
