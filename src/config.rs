@@ -9,7 +9,15 @@ use std::path::PathBuf;
 const DEFAULT_DAYS: u32 = 30;
 
 /// Default protected branches
-const DEFAULT_PROTECTED: &[&str] = &["main", "master", "develop", "staging", "production"];
+const DEFAULT_PROTECTED: &[&str] = &[
+    "main",
+    "master",
+    "trunk",
+    "development",
+    "develop",
+    "staging",
+    "production",
+];
 
 /// Default exclude patterns (WIP/draft branches)
 const DEFAULT_EXCLUDE_PATTERNS: &[&str] = &["wip/*", "draft/*", "*/wip", "*/draft"];
@@ -220,7 +228,15 @@ mod tests {
         assert_eq!(config.general.default_days, 30);
         assert_eq!(
             config.branches.protected,
-            vec!["main", "master", "develop", "staging", "production"]
+            vec![
+                "main",
+                "master",
+                "trunk",
+                "development",
+                "develop",
+                "staging",
+                "production"
+            ]
         );
         assert_eq!(
             config.branches.exclude_patterns,
