@@ -16,6 +16,7 @@
 - [Installation](#-installation)
   - [Quick Install (macOS/Linux)](#-quick-install-macoslinux)
   - [Homebrew (macOS/Linux)](#-homebrew-macoslinux)
+  - [Arch Linux (AUR)](#-arch-linux-aur)
   - [npm/npx](#-npmnpx)
   - [Cargo (from source)](#-cargo-from-source)
   - [Manual Download](#️-manual-download)
@@ -67,6 +68,17 @@ curl -sSf https://raw.githubusercontent.com/armgabrielyan/deadbranch/main/instal
 
 ```bash
 brew install armgabrielyan/tap/deadbranch
+```
+
+### 🐧 Arch Linux (AUR)
+
+Available as `deadbranch` (builds from source) and `deadbranch-bin` (pre-compiled binary).
+
+```bash
+# Install binary version (faster)
+yay -S deadbranch-bin
+# or
+paru -S deadbranch-bin
 ```
 
 ### 📦 npm/npx
