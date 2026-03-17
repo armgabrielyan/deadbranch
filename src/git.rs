@@ -120,6 +120,44 @@ fn is_rebase_merged(default_branch: &str, branch: &str) -> bool {
     }
 }
 
+/// Check if a branch was squash-merged into the default branch.
+///
+/// Creates a synthetic squash commit (branch's tree on top of the merge-base)
+/// and checks via `git cherry` if that squash already exists upstream.
+/// The temporary commit object is harmless and cleaned up by `git gc`.
+fn is_squash_merged(default_branch: &str, branch: &str) -> bool {
+    // Step 1: find merge-base
+    let mb_output = Command::new("git")
+        .args(["merge-base", default_branch, branch])
+        .output();
+    let merge_base = match mb_output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return false,
+    };
+
+    // Step 2: create synthetic squash commit
+    let tree_ref = format!("{}^{{tree}}", branch);
+    let ct_output = Command::new("git")
+        .args(["commit-tree", &tree_ref, "-p", &merge_base, "-m", "_"])
+        .output();
+    let synthetic_sha = match ct_output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return false,
+    };
+
+    // Step 3: check if the synthetic squash commit's patch exists upstream
+    let cherry_output = Command::new("git")
+        .args(["cherry", default_branch, &synthetic_sha])
+        .output();
+    match cherry_output {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            parse_cherry_output(&stdout)
+        }
+        _ => false,
+    }
+}
+
 /// Get the set of all branches merged into the default branch.
 /// Called once and shared across local/remote listing for O(1) lookups.
 fn get_merged_branches(default_branch: &str) -> Result<HashSet<String>> {
