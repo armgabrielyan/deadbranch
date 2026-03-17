@@ -329,3 +329,180 @@ fn test_list_shows_merged_status() {
         .success()
         .stdout(predicate::str::contains("merged-branch"));
 }
+
+#[test]
+fn test_squash_merged_branch_detected_as_merged() {
+    let repo = create_test_repo();
+
+    // Create feature branch with a commit
+    StdCommand::new("git")
+        .args(["checkout", "-b", "squash-feature"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    fs::write(repo.path().join("squash.txt"), "squash content").unwrap();
+    StdCommand::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    StdCommand::new("git")
+        .args(["commit", "-m", "Add squash feature"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    // Make it old (45+ days)
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let old_timestamp = now - (45 * 86400);
+    let date = format!("@{}", old_timestamp);
+    StdCommand::new("git")
+        .args(["commit", "--amend", "--no-edit", "--date", &date])
+        .current_dir(&repo)
+        .env("GIT_COMMITTER_DATE", &date)
+        .output()
+        .unwrap();
+
+    // Go back to main and squash-merge
+    StdCommand::new("git")
+        .args(["checkout", "main"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    StdCommand::new("git")
+        .args(["merge", "--squash", "squash-feature"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    StdCommand::new("git")
+        .args(["commit", "-m", "Squash merge squash-feature"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    // deadbranch list --merged should show the squash-merged branch
+    Command::cargo_bin("deadbranch")
+        .unwrap()
+        .args(["list", "--merged"])
+        .current_dir(&repo)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("squash-feature"));
+}
+
+#[test]
+fn test_rebase_merged_branch_detected_as_merged() {
+    let repo = create_test_repo();
+
+    // Create feature branch with a commit
+    StdCommand::new("git")
+        .args(["checkout", "-b", "rebase-feature"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    fs::write(repo.path().join("rebase.txt"), "rebase content").unwrap();
+    StdCommand::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    StdCommand::new("git")
+        .args(["commit", "-m", "Add rebase feature"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    // Make it old (45+ days)
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let old_timestamp = now - (45 * 86400);
+    let date = format!("@{}", old_timestamp);
+    StdCommand::new("git")
+        .args(["commit", "--amend", "--no-edit", "--date", &date])
+        .current_dir(&repo)
+        .env("GIT_COMMITTER_DATE", &date)
+        .output()
+        .unwrap();
+
+    // Go back to main and simulate rebase-merge (cherry-pick to create new SHA)
+    StdCommand::new("git")
+        .args(["checkout", "main"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    StdCommand::new("git")
+        .args(["cherry-pick", "rebase-feature"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    // deadbranch list --merged should show the rebase-merged branch
+    Command::cargo_bin("deadbranch")
+        .unwrap()
+        .args(["list", "--merged"])
+        .current_dir(&repo)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rebase-feature"));
+}
+
+#[test]
+fn test_truly_unmerged_branch_not_detected_as_merged() {
+    let repo = create_test_repo();
+
+    // Create feature branch with a commit (different content from main)
+    StdCommand::new("git")
+        .args(["checkout", "-b", "truly-unmerged"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    fs::write(repo.path().join("unmerged.txt"), "unique content").unwrap();
+    StdCommand::new("git")
+        .args(["add", "."])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    StdCommand::new("git")
+        .args(["commit", "-m", "Add unmerged feature"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    // Make it old
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let old_timestamp = now - (45 * 86400);
+    let date = format!("@{}", old_timestamp);
+    StdCommand::new("git")
+        .args(["commit", "--amend", "--no-edit", "--date", &date])
+        .current_dir(&repo)
+        .env("GIT_COMMITTER_DATE", &date)
+        .output()
+        .unwrap();
+
+    // Go back to main — do NOT merge
+    StdCommand::new("git")
+        .args(["checkout", "main"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    // deadbranch list --merged should NOT show the unmerged branch
+    Command::cargo_bin("deadbranch")
+        .unwrap()
+        .args(["list", "--merged"])
+        .current_dir(&repo)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("truly-unmerged").not());
+}
