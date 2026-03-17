@@ -91,6 +91,18 @@ pub fn list_branches(default_branch: &str) -> Result<Vec<Branch>> {
     Ok(branches)
 }
 
+/// Parse `git cherry` output. Returns `true` if ALL commits are already
+/// upstream (every non-empty line starts with `- `), indicating a
+/// rebase-merge or cherry-pick. Empty output (no unique commits) also
+/// returns `true`.
+fn parse_cherry_output(output: &str) -> bool {
+    let lines: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return true;
+    }
+    lines.iter().all(|line| line.starts_with("- "))
+}
+
 /// Get the set of all branches merged into the default branch.
 /// Called once and shared across local/remote listing for O(1) lookups.
 fn get_merged_branches(default_branch: &str) -> Result<HashSet<String>> {
@@ -540,5 +552,38 @@ error: failed to push some refs to 'github.com:user/repo.git'
         assert!(!results[0].1); // feat/a failed
         assert!(results[1].1); // feat/b succeeded
         assert!(!results[2].1); // feat/c failed
+    }
+
+    // ── Cherry output parsing ────────────────────────────────
+
+    #[test]
+    fn cherry_all_merged() {
+        assert!(parse_cherry_output("- abc123 msg1\n- def456 msg2\n"));
+    }
+
+    #[test]
+    fn cherry_none_merged() {
+        assert!(!parse_cherry_output("+ abc123 msg1\n+ def456 msg2\n"));
+    }
+
+    #[test]
+    fn cherry_partial_merged() {
+        assert!(!parse_cherry_output("- abc123 msg1\n+ def456 msg2\n"));
+    }
+
+    #[test]
+    fn cherry_empty_output() {
+        // No unique commits = effectively merged
+        assert!(parse_cherry_output(""));
+    }
+
+    #[test]
+    fn cherry_single_merged() {
+        assert!(parse_cherry_output("- abc123 msg\n"));
+    }
+
+    #[test]
+    fn cherry_single_not_merged() {
+        assert!(!parse_cherry_output("+ abc123 msg\n"));
     }
 }
