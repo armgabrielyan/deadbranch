@@ -88,6 +88,17 @@ pub fn list_branches(default_branch: &str) -> Result<Vec<Branch>> {
     let mut branches = list_local_branches(&merged)?;
     branches.extend(list_remote_branches(default_branch, &merged)?);
 
+    // Second pass: detect squash-merged and rebase-merged branches
+    for branch in &mut branches {
+        if !branch.is_merged {
+            if is_rebase_merged(default_branch, &branch.name)
+                || is_squash_merged(default_branch, &branch.name)
+            {
+                branch.is_merged = true;
+            }
+        }
+    }
+
     Ok(branches)
 }
 
