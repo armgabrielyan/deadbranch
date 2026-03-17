@@ -107,11 +107,10 @@ pub fn list_branches(default_branch: &str) -> Result<Vec<Branch>> {
 /// rebase-merge or cherry-pick. Empty output (no unique commits) also
 /// returns `true`.
 fn parse_cherry_output(output: &str) -> bool {
-    let lines: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
-    if lines.is_empty() {
-        return true;
-    }
-    lines.iter().all(|line| line.starts_with("- "))
+    output
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .all(|line| line.starts_with("- "))
 }
 
 /// Check if a branch was rebase-merged into the default branch.
