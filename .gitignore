@@ -37,3 +37,6 @@ CLAUDE.md
 
 # homebrew-tap repository
 homebrew-tap
+
+# Git worktrees
+.worktrees/
