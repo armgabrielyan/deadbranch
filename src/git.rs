@@ -103,6 +103,23 @@ fn parse_cherry_output(output: &str) -> bool {
     lines.iter().all(|line| line.starts_with("- "))
 }
 
+/// Check if a branch was rebase-merged into the default branch.
+/// Uses `git cherry` to compare patch-ids — if every commit on the branch
+/// has a matching patch in upstream, the branch was rebase-merged.
+fn is_rebase_merged(default_branch: &str, branch: &str) -> bool {
+    let output = Command::new("git")
+        .args(["cherry", default_branch, branch])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            parse_cherry_output(&stdout)
+        }
+        _ => false,
+    }
+}
+
 /// Get the set of all branches merged into the default branch.
 /// Called once and shared across local/remote listing for O(1) lookups.
 fn get_merged_branches(default_branch: &str) -> Result<HashSet<String>> {
