@@ -142,6 +142,28 @@ pub struct BranchFilter {
 }
 
 impl BranchFilter {
+    /// Check if a branch passes all filters except `merged_only`.
+    /// Use this before running the squash-merge tree-check pass, since that
+    /// pass can promote `is_merged` from false to true.
+    pub fn matches_pre_merge(&self, branch: &Branch) -> bool {
+        if branch.age_days < self.min_age_days as i64 {
+            return false;
+        }
+        if self.local_only && branch.is_remote {
+            return false;
+        }
+        if self.remote_only && !branch.is_remote {
+            return false;
+        }
+        if branch.is_protected(&self.protected_branches) {
+            return false;
+        }
+        if branch.matches_exclude_pattern(&self.exclude_patterns) {
+            return false;
+        }
+        true
+    }
+
     /// Check if a branch passes this filter
     pub fn matches(&self, branch: &Branch) -> bool {
         // Check age

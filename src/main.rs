@@ -104,12 +104,6 @@ fn cmd_list(
         default_branch
     ));
 
-    // List all branches
-    let spinner = ui::spinner("Loading branches...");
-    let all_branches = git::list_branches(&default_branch)?;
-    spinner.finish_and_clear();
-
-    // Filter branches
     let filter = BranchFilter {
         min_age_days: min_age,
         local_only,
@@ -119,10 +113,22 @@ fn cmd_list(
         exclude_patterns: config.branches.exclude_patterns,
     };
 
+    // First pass: list and pre-filter (excludes merged_only so tree-check runs on all candidates)
+    let all_branches = git::list_branches(&default_branch)?;
     let mut branches: Vec<_> = all_branches
         .into_iter()
-        .filter(|b| filter.matches(b))
+        .filter(|b| filter.matches_pre_merge(b))
         .collect();
+
+    // Second pass: tree-check for squash/rebase merges — progress total matches table row count
+    let progress = ui::progress_bar("Checking branches...");
+    git::detect_squash_merges(&mut branches, &default_branch, &progress);
+    progress.finish_and_clear();
+
+    // Apply merged_only now that is_merged is final
+    if filter.merged_only {
+        branches.retain(|b| b.is_merged);
+    }
 
     // Sort: unmerged first, then by age (oldest first)
     branch::sort_branches(&mut branches);
@@ -173,10 +179,8 @@ fn cmd_clean(
         .clone()
         .unwrap_or_else(|| git::get_default_branch().unwrap_or_else(|_| "main".to_string()));
 
-    // List all branches
-    let spinner = ui::spinner("Loading branches...");
+    // First pass: list branches
     let all_branches = git::list_branches(&default_branch)?;
-    spinner.finish_and_clear();
 
     if interactive {
         // For TUI, apply only age + protection + exclusion filters.
@@ -190,10 +194,14 @@ fn cmd_clean(
             exclude_patterns: config.branches.exclude_patterns.clone(),
         };
 
-        let tui_branches: Vec<_> = all_branches
+        let mut tui_branches: Vec<_> = all_branches
             .into_iter()
-            .filter(|b| tui_filter.matches(b))
+            .filter(|b| tui_filter.matches_pre_merge(b))
             .collect();
+
+        let progress = ui::progress_bar("Checking branches...");
+        git::detect_squash_merges(&mut tui_branches, &default_branch, &progress);
+        progress.finish_and_clear();
 
         if tui_branches.is_empty() {
             ui::info("No branches to show in interactive mode.");
@@ -227,11 +235,21 @@ fn cmd_clean(
         exclude_patterns: config.branches.exclude_patterns,
     };
 
-    // Filter branches
+    // Pre-filter (skip merged_only: tree-check can change merge status)
     let mut branches: Vec<_> = all_branches
         .into_iter()
-        .filter(|b| filter.matches(b))
+        .filter(|b| filter.matches_pre_merge(b))
         .collect();
+
+    // Second pass: tree-check — progress total matches table row count
+    let progress = ui::progress_bar("Checking branches...");
+    git::detect_squash_merges(&mut branches, &default_branch, &progress);
+    progress.finish_and_clear();
+
+    // Apply merged_only now that is_merged is final
+    if filter.merged_only {
+        branches.retain(|b| b.is_merged);
+    }
 
     // Sort: unmerged first, then by age (oldest first)
     branch::sort_branches(&mut branches);
@@ -570,10 +588,6 @@ fn cmd_stats(days: Option<u32>) -> Result<()> {
         default_branch
     ));
 
-    let spinner = ui::spinner("Loading branches...");
-    let all_branches = git::list_branches(&default_branch)?;
-    spinner.finish_and_clear();
-
     // Apply the same visibility rules as list/clean: respect protected and
     // exclude_patterns, but no age filter — stats covers all visible branches.
     let filter = BranchFilter {
@@ -585,10 +599,15 @@ fn cmd_stats(days: Option<u32>) -> Result<()> {
         exclude_patterns: config.branches.exclude_patterns,
     };
 
-    let branches: Vec<_> = all_branches
+    let all_branches = git::list_branches(&default_branch)?;
+    let mut branches: Vec<_> = all_branches
         .into_iter()
-        .filter(|b| filter.matches(b))
+        .filter(|b| filter.matches_pre_merge(b))
         .collect();
+
+    let progress = ui::progress_bar("Checking branches...");
+    git::detect_squash_merges(&mut branches, &default_branch, &progress);
+    progress.finish_and_clear();
 
     let repo_stats = stats::compute_stats(&branches, min_age);
     ui::display_repo_stats(&repo_stats);

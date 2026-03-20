@@ -49,6 +49,9 @@ thiserror = "2.0"             # Custom error types
 # Search
 sublime_fuzzy = "0.7"        # Fuzzy string matching
 
+# Parallelism
+rayon = "1.11"                # Data parallelism
+
 # Utilities
 dirs = "6.0"                  # Platform-specific directories (~/.config)
 which = "8.0.0"               # Locate executables in PATH

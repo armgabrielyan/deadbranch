@@ -2,9 +2,12 @@
 
 use std::collections::HashSet;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{TimeZone, Utc};
+use indicatif::ProgressBar;
+use rayon::prelude::*;
 
 use crate::branch::Branch;
 use crate::error::DeadbranchError;
@@ -80,15 +83,66 @@ pub fn fetch_and_prune() -> Result<()> {
     Ok(())
 }
 
-/// List all branches (local and remote)
+/// List all branches (local and remote) with first-pass merge detection only.
+/// Call [`detect_squash_merges`] on the filtered result to run the tree-check pass.
 pub fn list_branches(default_branch: &str) -> Result<Vec<Branch>> {
-    // Fetch all merged branches once (instead of per-branch)
     let merged = get_merged_branches(default_branch)?;
-
     let mut branches = list_local_branches(&merged)?;
     branches.extend(list_remote_branches(default_branch, &merged)?);
-
     Ok(branches)
+}
+
+/// Second-pass merge detection: checks squash-merged and rebase-merged branches
+/// via `git merge-tree` on the pre-filtered `branches` slice.
+///
+/// The progress bar total is set to `branches.len()`, so it matches the table
+/// row count shown to the user.
+pub fn detect_squash_merges(
+    branches: &mut [Branch],
+    default_branch: &str,
+    progress: &ProgressBar,
+) {
+    let already_merged = branches.iter().filter(|b| b.is_merged).count();
+    progress.set_length(branches.len() as u64);
+    progress.set_position(already_merged as u64);
+
+    let default_tree = {
+        let output = Command::new("git")
+            .args(["rev-parse", &format!("{}^{{tree}}", default_branch)])
+            .output();
+        match output {
+            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            _ => return,
+        }
+    };
+
+    let checked = AtomicUsize::new(already_merged);
+    branches.par_iter_mut().for_each(|branch| {
+        if !branch.is_merged {
+            if is_branch_merged_by_tree(&default_tree, default_branch, &branch.name) {
+                branch.is_merged = true;
+            }
+            let done = checked.fetch_add(1, Ordering::Relaxed) + 1;
+            progress.set_position(done as u64);
+        }
+    });
+}
+
+/// Check if a branch was squash-merged or rebase-merged into the default branch.
+///
+/// Simulates merging `branch` into `default_branch` via `git merge-tree --write-tree`.
+/// If the resulting tree equals default_branch's current tree, the branch's
+/// changes are already fully incorporated (squash-merge, rebase-merge, or cherry-pick).
+fn is_branch_merged_by_tree(default_tree: &str, default_branch: &str, branch: &str) -> bool {
+    let merged_tree = Command::new("git")
+        .args(["merge-tree", "--write-tree", "--no-messages", default_branch, branch])
+        .output();
+    let merged_tree = match merged_tree {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => return false, // conflict or error → not merged
+    };
+
+    merged_tree == default_tree
 }
 
 /// Get the set of all branches merged into the default branch.

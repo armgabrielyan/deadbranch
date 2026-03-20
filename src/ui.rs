@@ -35,13 +35,27 @@ pub fn pluralize_branch_cap(count: usize) -> &'static str {
     pluralize(count, "Branch", "Branches")
 }
 
+/// Create a progress bar with count display
+pub fn progress_bar(message: &str) -> ProgressBar {
+    let pb = ProgressBar::new(0);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            .template("{spinner} {msg} {pos}/{len}")
+            .unwrap(),
+    );
+    pb.set_message(message.to_string());
+    pb.enable_steady_tick(Duration::from_millis(80));
+    pb
+}
+
 /// Create a spinner with a message
 pub fn spinner(message: &str) -> ProgressBar {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
             .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-            .template("{spinner:.blue} {msg}")
+            .template("{spinner} {msg}")
             .unwrap(),
     );
     spinner.set_message(message.to_string());
