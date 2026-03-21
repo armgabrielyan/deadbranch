@@ -166,35 +166,7 @@ impl BranchFilter {
 
     /// Check if a branch passes this filter
     pub fn matches(&self, branch: &Branch) -> bool {
-        // Check age
-        if branch.age_days < self.min_age_days as i64 {
-            return false;
-        }
-
-        // Check local/remote filter
-        if self.local_only && branch.is_remote {
-            return false;
-        }
-        if self.remote_only && !branch.is_remote {
-            return false;
-        }
-
-        // Check merged filter
-        if self.merged_only && !branch.is_merged {
-            return false;
-        }
-
-        // Exclude protected branches
-        if branch.is_protected(&self.protected_branches) {
-            return false;
-        }
-
-        // Exclude branches matching exclude patterns
-        if branch.matches_exclude_pattern(&self.exclude_patterns) {
-            return false;
-        }
-
-        true
+        self.matches_pre_merge(branch) && (!self.merged_only || branch.is_merged)
     }
 }
 
@@ -435,6 +407,74 @@ mod tests {
         // WIP
         let wip = test_branch("wip/feature", 45, true, false);
         assert!(!filter.matches(&wip));
+    }
+
+    // ── matches_pre_merge tests ─────────────────────────────────────
+
+    #[test]
+    fn test_pre_merge_filter_by_age() {
+        let filter = BranchFilter {
+            min_age_days: 30,
+            ..Default::default()
+        };
+        assert!(filter.matches_pre_merge(&test_branch("old", 45, false, false)));
+        assert!(!filter.matches_pre_merge(&test_branch("new", 15, false, false)));
+        assert!(filter.matches_pre_merge(&test_branch("exact", 30, false, false)));
+    }
+
+    #[test]
+    fn test_pre_merge_filter_local_only() {
+        let filter = BranchFilter {
+            local_only: true,
+            ..Default::default()
+        };
+        assert!(filter.matches_pre_merge(&test_branch("feature", 45, false, false)));
+        assert!(!filter.matches_pre_merge(&test_branch("origin/feature", 45, false, true)));
+    }
+
+    #[test]
+    fn test_pre_merge_filter_remote_only() {
+        let filter = BranchFilter {
+            remote_only: true,
+            ..Default::default()
+        };
+        assert!(!filter.matches_pre_merge(&test_branch("feature", 45, false, false)));
+        assert!(filter.matches_pre_merge(&test_branch("origin/feature", 45, false, true)));
+    }
+
+    #[test]
+    fn test_pre_merge_ignores_merged_only() {
+        // merged_only must have no effect in matches_pre_merge
+        let filter = BranchFilter {
+            merged_only: true,
+            ..Default::default()
+        };
+        let unmerged = test_branch("feature", 45, false, false);
+        assert!(filter.matches_pre_merge(&unmerged), "matches_pre_merge must not filter on merged_only");
+        let merged = test_branch("feature", 45, true, false);
+        assert!(filter.matches_pre_merge(&merged));
+    }
+
+    #[test]
+    fn test_pre_merge_filter_protected() {
+        let filter = BranchFilter {
+            protected_branches: vec!["main".to_string(), "develop".to_string()],
+            ..Default::default()
+        };
+        assert!(filter.matches_pre_merge(&test_branch("feature", 45, false, false)));
+        assert!(!filter.matches_pre_merge(&test_branch("main", 45, false, false)));
+        assert!(!filter.matches_pre_merge(&test_branch("develop", 45, false, false)));
+    }
+
+    #[test]
+    fn test_pre_merge_filter_exclude_patterns() {
+        let filter = BranchFilter {
+            exclude_patterns: vec!["wip/*".to_string(), "*/draft".to_string()],
+            ..Default::default()
+        };
+        assert!(filter.matches_pre_merge(&test_branch("feature/test", 45, false, false)));
+        assert!(!filter.matches_pre_merge(&test_branch("wip/feature", 45, false, false)));
+        assert!(!filter.matches_pre_merge(&test_branch("feature/draft", 45, false, false)));
     }
 
     #[test]

@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{TimeZone, Utc};
-use indicatif::ProgressBar;
 use rayon::prelude::*;
 
 use crate::branch::Branch;
@@ -95,12 +94,18 @@ pub fn list_branches(default_branch: &str) -> Result<Vec<Branch>> {
 /// Second-pass merge detection: checks squash-merged and rebase-merged branches
 /// via `git merge-tree` on the pre-filtered `branches` slice.
 ///
-/// The progress bar total is set to `branches.len()`, so it matches the table
-/// row count shown to the user.
-pub fn detect_squash_merges(branches: &mut [Branch], default_branch: &str, progress: &ProgressBar) {
+/// `on_progress(done, total)` is called on each step so callers can update a
+/// progress bar without this module depending on any UI crate.
+///
+/// Returns a list of warning strings for any failures encountered.
+pub fn detect_squash_merges(
+    branches: &mut [Branch],
+    default_branch: &str,
+    on_progress: impl Fn(usize, usize) + Sync,
+) -> Vec<String> {
     let already_merged = branches.iter().filter(|b| b.is_merged).count();
-    progress.set_length(branches.len() as u64);
-    progress.set_position(already_merged as u64);
+    let total = branches.len();
+    on_progress(already_merged, total);
 
     let default_tree = {
         let output = Command::new("git")
@@ -108,20 +113,40 @@ pub fn detect_squash_merges(branches: &mut [Branch], default_branch: &str, progr
             .output();
         match output {
             Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-            _ => return,
+            _ => {
+                return vec![format!(
+                    "Could not resolve tree for '{}', skipping squash-merge detection",
+                    default_branch
+                )];
+            }
         }
     };
 
     let checked = AtomicUsize::new(already_merged);
+    let errors = AtomicUsize::new(0);
     branches.par_iter_mut().for_each(|branch| {
         if !branch.is_merged {
-            if is_branch_merged_by_tree(&default_tree, default_branch, &branch.name) {
-                branch.is_merged = true;
+            match is_branch_merged_by_tree(&default_tree, default_branch, &branch.name) {
+                Some(true) => branch.is_merged = true,
+                None => {
+                    errors.fetch_add(1, Ordering::Relaxed);
+                }
+                Some(false) => {}
             }
             let done = checked.fetch_add(1, Ordering::Relaxed) + 1;
-            progress.set_position(done as u64);
+            on_progress(done, total);
         }
     });
+
+    let error_count = errors.load(Ordering::Relaxed);
+    if error_count > 0 {
+        vec![format!(
+            "Squash-merge check failed for {} branch(es); those branches may show as unmerged",
+            error_count
+        )]
+    } else {
+        vec![]
+    }
 }
 
 /// Check if a branch was squash-merged or rebase-merged into the default branch.
@@ -129,8 +154,11 @@ pub fn detect_squash_merges(branches: &mut [Branch], default_branch: &str, progr
 /// Simulates merging `branch` into `default_branch` via `git merge-tree --write-tree`.
 /// If the resulting tree equals default_branch's current tree, the branch's
 /// changes are already fully incorporated (squash-merge, rebase-merge, or cherry-pick).
-fn is_branch_merged_by_tree(default_tree: &str, default_branch: &str, branch: &str) -> bool {
-    let merged_tree = Command::new("git")
+/// Returns `Some(true)` if the branch is fully incorporated, `Some(false)` if
+/// it has unincorporated changes, or `None` if the command failed (conflict,
+/// unknown ref, etc.) so callers can track error counts separately.
+fn is_branch_merged_by_tree(default_tree: &str, default_branch: &str, branch: &str) -> Option<bool> {
+    let output = Command::new("git")
         .args([
             "merge-tree",
             "--write-tree",
@@ -139,12 +167,12 @@ fn is_branch_merged_by_tree(default_tree: &str, default_branch: &str, branch: &s
             branch,
         ])
         .output();
-    let merged_tree = match merged_tree {
+    let merged_tree = match output {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => return false, // conflict or error → not merged
+        _ => return None,
     };
 
-    merged_tree == default_tree
+    Some(merged_tree == default_tree)
 }
 
 /// Get the set of all branches merged into the default branch.
