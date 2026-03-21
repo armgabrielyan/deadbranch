@@ -97,11 +97,7 @@ pub fn list_branches(default_branch: &str) -> Result<Vec<Branch>> {
 ///
 /// The progress bar total is set to `branches.len()`, so it matches the table
 /// row count shown to the user.
-pub fn detect_squash_merges(
-    branches: &mut [Branch],
-    default_branch: &str,
-    progress: &ProgressBar,
-) {
+pub fn detect_squash_merges(branches: &mut [Branch], default_branch: &str, progress: &ProgressBar) {
     let already_merged = branches.iter().filter(|b| b.is_merged).count();
     progress.set_length(branches.len() as u64);
     progress.set_position(already_merged as u64);
@@ -135,7 +131,13 @@ pub fn detect_squash_merges(
 /// changes are already fully incorporated (squash-merge, rebase-merge, or cherry-pick).
 fn is_branch_merged_by_tree(default_tree: &str, default_branch: &str, branch: &str) -> bool {
     let merged_tree = Command::new("git")
-        .args(["merge-tree", "--write-tree", "--no-messages", default_branch, branch])
+        .args([
+            "merge-tree",
+            "--write-tree",
+            "--no-messages",
+            default_branch,
+            branch,
+        ])
         .output();
     let merged_tree = match merged_tree {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
