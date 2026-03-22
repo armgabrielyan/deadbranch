@@ -157,7 +157,11 @@ pub fn detect_squash_merges(
 /// Returns `Some(true)` if the branch is fully incorporated, `Some(false)` if
 /// it has unincorporated changes, or `None` if the command failed (conflict,
 /// unknown ref, etc.) so callers can track error counts separately.
-fn is_branch_merged_by_tree(default_tree: &str, default_branch: &str, branch: &str) -> Option<bool> {
+fn is_branch_merged_by_tree(
+    default_tree: &str,
+    default_branch: &str,
+    branch: &str,
+) -> Option<bool> {
     let output = Command::new("git")
         .args([
             "merge-tree",

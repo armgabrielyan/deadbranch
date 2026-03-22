@@ -450,7 +450,10 @@ mod tests {
             ..Default::default()
         };
         let unmerged = test_branch("feature", 45, false, false);
-        assert!(filter.matches_pre_merge(&unmerged), "matches_pre_merge must not filter on merged_only");
+        assert!(
+            filter.matches_pre_merge(&unmerged),
+            "matches_pre_merge must not filter on merged_only"
+        );
         let merged = test_branch("feature", 45, true, false);
         assert!(filter.matches_pre_merge(&merged));
     }
