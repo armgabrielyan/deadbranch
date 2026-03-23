@@ -99,7 +99,7 @@ fn load_filtered_branches(
 
     let progress = ui::progress_bar("Checking branches...");
     progress.set_length(branches.len() as u64);
-    let warnings = git::detect_squash_merges(&mut branches, default_branch, |done, _total| {
+    let warnings = git::detect_squash_merges(&mut branches, default_branch, |done| {
         progress.set_position(done as u64);
     });
     progress.finish_and_clear();

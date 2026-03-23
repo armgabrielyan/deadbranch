@@ -101,11 +101,10 @@ pub fn list_branches(default_branch: &str) -> Result<Vec<Branch>> {
 pub fn detect_squash_merges(
     branches: &mut [Branch],
     default_branch: &str,
-    on_progress: impl Fn(usize, usize) + Sync,
+    on_progress: impl Fn(usize) + Sync,
 ) -> Vec<String> {
     let already_merged = branches.iter().filter(|b| b.is_merged).count();
-    let total = branches.len();
-    on_progress(already_merged, total);
+    on_progress(already_merged);
 
     let default_tree = {
         let output = Command::new("git")
@@ -134,7 +133,7 @@ pub fn detect_squash_merges(
                 Some(false) => {}
             }
             let done = checked.fetch_add(1, Ordering::Relaxed) + 1;
-            on_progress(done, total);
+            on_progress(done);
         }
     });
 
