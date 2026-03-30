@@ -586,6 +586,7 @@ mod tests {
             name: name.to_string(),
             age_days,
             is_merged,
+            merged_by_tree: false,
             is_remote,
             last_commit_sha: "abc123".to_string(),
             last_commit_date: Utc::now(),

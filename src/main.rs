@@ -346,7 +346,7 @@ pub(crate) fn delete_branches_with_backup(branches: &[branch::Branch], force: bo
     let mut failed = 0;
 
     for branch in branches {
-        match git::delete_local_branch(&branch.name, force) {
+        match git::delete_local_branch(&branch.name, force || branch.merged_by_tree) {
             Ok(()) => {
                 println!("  {} {}", console::style("✅").green(), branch.name);
                 deleted += 1;

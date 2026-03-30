@@ -1,49 +1,13 @@
 //! Additional integration tests for edge cases and git operations
 
+mod common;
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
 use std::process::Command as StdCommand;
-use tempfile::TempDir;
 
-/// Helper to create a test git repository with a commit
-fn create_test_repo() -> TempDir {
-    let temp_dir = TempDir::new().unwrap();
-
-    // Initialize git repo with explicit main branch
-    StdCommand::new("git")
-        .args(["init", "-b", "main"])
-        .current_dir(&temp_dir)
-        .output()
-        .unwrap();
-
-    // Set git config (required for commits)
-    StdCommand::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(&temp_dir)
-        .output()
-        .unwrap();
-    StdCommand::new("git")
-        .args(["config", "user.name", "Test User"])
-        .current_dir(&temp_dir)
-        .output()
-        .unwrap();
-
-    // Create initial commit on main branch
-    fs::write(temp_dir.path().join("README.md"), "# Test repo").unwrap();
-    StdCommand::new("git")
-        .args(["add", "."])
-        .current_dir(&temp_dir)
-        .output()
-        .unwrap();
-    StdCommand::new("git")
-        .args(["commit", "-m", "Initial commit"])
-        .current_dir(&temp_dir)
-        .output()
-        .unwrap();
-
-    temp_dir
-}
+use common::create_test_repo;
 
 #[test]
 #[allow(deprecated)]
@@ -334,46 +298,9 @@ fn test_list_shows_merged_status() {
 #[allow(deprecated)]
 fn test_squash_merged_branch_detected_as_merged() {
     let repo = create_test_repo();
+    common::create_branch(repo.path(), "squash-feature");
+    common::make_branch_old(repo.path(), "squash-feature", 45);
 
-    // Create a branch with a commit
-    StdCommand::new("git")
-        .args(["checkout", "-b", "squash-feature"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-    fs::write(repo.path().join("squash.txt"), "squash content").unwrap();
-    StdCommand::new("git")
-        .args(["add", "."])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-    StdCommand::new("git")
-        .args(["commit", "-m", "Add squash feature"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-
-    // Make it old enough to show in list
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let old_timestamp = now - (45 * 86400);
-    let date = format!("@{}", old_timestamp);
-    StdCommand::new("git")
-        .args(["commit", "--amend", "--no-edit", "--date", &date])
-        .env("GIT_COMMITTER_DATE", &date)
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-
-    // Squash-merge the branch into main
-    StdCommand::new("git")
-        .args(["checkout", "main"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
     StdCommand::new("git")
         .args(["merge", "--squash", "squash-feature"])
         .current_dir(&repo)
@@ -385,7 +312,6 @@ fn test_squash_merged_branch_detected_as_merged() {
         .output()
         .unwrap();
 
-    // The squash-merged branch should appear in --merged list
     Command::cargo_bin("deadbranch")
         .unwrap()
         .args(["list", "--merged"])
@@ -399,53 +325,16 @@ fn test_squash_merged_branch_detected_as_merged() {
 #[allow(deprecated)]
 fn test_rebase_merged_branch_detected_as_merged() {
     let repo = create_test_repo();
+    common::create_branch(repo.path(), "rebase-feature");
+    common::make_branch_old(repo.path(), "rebase-feature", 45);
 
-    // Create a branch with a commit
-    StdCommand::new("git")
-        .args(["checkout", "-b", "rebase-feature"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-    fs::write(repo.path().join("rebase.txt"), "rebase content").unwrap();
-    StdCommand::new("git")
-        .args(["add", "."])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-    StdCommand::new("git")
-        .args(["commit", "-m", "Add rebase feature"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-
-    // Make it old enough to show in list
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let old_timestamp = now - (45 * 86400);
-    let date = format!("@{}", old_timestamp);
-    StdCommand::new("git")
-        .args(["commit", "--amend", "--no-edit", "--date", &date])
-        .env("GIT_COMMITTER_DATE", &date)
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-
-    // Cherry-pick the commit onto main (simulates rebase-merge)
-    StdCommand::new("git")
-        .args(["checkout", "main"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
+    // Cherry-pick onto main (simulates rebase-merge)
     StdCommand::new("git")
         .args(["cherry-pick", "rebase-feature"])
         .current_dir(&repo)
         .output()
         .unwrap();
 
-    // The cherry-picked branch should appear in --merged list
     Command::cargo_bin("deadbranch")
         .unwrap()
         .args(["list", "--merged"])
@@ -459,47 +348,9 @@ fn test_rebase_merged_branch_detected_as_merged() {
 #[allow(deprecated)]
 fn test_truly_unmerged_branch_not_detected_as_merged() {
     let repo = create_test_repo();
+    common::create_branch(repo.path(), "unmerged-feature");
+    common::make_branch_old(repo.path(), "unmerged-feature", 45);
 
-    // Create a branch with a commit but never merge it
-    StdCommand::new("git")
-        .args(["checkout", "-b", "unmerged-feature"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-    fs::write(repo.path().join("unmerged.txt"), "unmerged content").unwrap();
-    StdCommand::new("git")
-        .args(["add", "."])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-    StdCommand::new("git")
-        .args(["commit", "-m", "Add unmerged feature"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-
-    // Make it old enough to show in list
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let old_timestamp = now - (45 * 86400);
-    let date = format!("@{}", old_timestamp);
-    StdCommand::new("git")
-        .args(["commit", "--amend", "--no-edit", "--date", &date])
-        .env("GIT_COMMITTER_DATE", &date)
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-
-    StdCommand::new("git")
-        .args(["checkout", "main"])
-        .current_dir(&repo)
-        .output()
-        .unwrap();
-
-    // The unmerged branch should NOT appear in --merged list
     Command::cargo_bin("deadbranch")
         .unwrap()
         .args(["list", "--merged"])
@@ -507,4 +358,74 @@ fn test_truly_unmerged_branch_not_detected_as_merged() {
         .assert()
         .success()
         .stdout(predicate::str::contains("unmerged-feature").not());
+}
+
+#[test]
+#[allow(deprecated)]
+fn test_clean_deletes_squash_merged_branch() {
+    let repo = create_test_repo();
+    common::create_branch(repo.path(), "squash-clean-test");
+    common::make_branch_old(repo.path(), "squash-clean-test", 45);
+
+    StdCommand::new("git")
+        .args(["merge", "--squash", "squash-clean-test"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    StdCommand::new("git")
+        .args(["commit", "-m", "Squash merge squash-clean-test"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    Command::cargo_bin("deadbranch")
+        .unwrap()
+        .args(["clean", "-y"])
+        .current_dir(&repo)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("squash-clean-test"));
+
+    let out = StdCommand::new("git")
+        .args(["branch", "--list", "squash-clean-test"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("squash-clean-test"),
+        "squash-merged branch should have been deleted"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn test_clean_deletes_rebase_merged_branch() {
+    let repo = create_test_repo();
+    common::create_branch(repo.path(), "rebase-clean-test");
+    common::make_branch_old(repo.path(), "rebase-clean-test", 45);
+
+    // Cherry-pick onto main (simulates rebase-merge)
+    StdCommand::new("git")
+        .args(["cherry-pick", "rebase-clean-test"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+
+    Command::cargo_bin("deadbranch")
+        .unwrap()
+        .args(["clean", "-y"])
+        .current_dir(&repo)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rebase-clean-test"));
+
+    let out = StdCommand::new("git")
+        .args(["branch", "--list", "rebase-clean-test"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("rebase-clean-test"),
+        "rebase-merged branch should have been deleted"
+    );
 }

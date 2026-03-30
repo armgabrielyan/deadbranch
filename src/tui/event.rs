@@ -441,7 +441,8 @@ fn start_background_deletions(app: &mut App) {
 
         // Delete local branches one by one
         for branch in local {
-            let result = crate::git::delete_local_branch(&branch.name, force);
+            let result =
+                crate::git::delete_local_branch(&branch.name, force || branch.merged_by_tree);
             let _ = tx.send(DeletionResult {
                 branch,
                 success: result.is_ok(),

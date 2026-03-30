@@ -33,6 +33,9 @@ pub struct Branch {
     pub age_days: i64,
     /// Whether the branch is merged into the default branch
     pub is_merged: bool,
+    /// Whether merge was detected via tree comparison (squash/rebase merge).
+    /// These branches need `git branch -D` since ancestry-based `-d` will fail.
+    pub merged_by_tree: bool,
     /// Whether this is a remote branch
     pub is_remote: bool,
     /// SHA of the last commit
@@ -194,6 +197,7 @@ mod tests {
             name: name.to_string(),
             age_days,
             is_merged,
+            merged_by_tree: false,
             is_remote,
             last_commit_sha: "abc123".to_string(),
             last_commit_date: Utc::now(),

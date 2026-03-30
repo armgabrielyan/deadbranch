@@ -126,7 +126,10 @@ pub fn detect_squash_merges(
     branches.par_iter_mut().for_each(|branch| {
         if !branch.is_merged {
             match is_branch_merged_by_tree(&default_tree, default_branch, &branch.name) {
-                Some(true) => branch.is_merged = true,
+                Some(true) => {
+                    branch.is_merged = true;
+                    branch.merged_by_tree = true;
+                }
                 None => {
                     errors.fetch_add(1, Ordering::Relaxed);
                 }
@@ -261,6 +264,7 @@ fn list_local_branches(merged: &HashSet<String>) -> Result<Vec<Branch>> {
             name,
             age_days,
             is_merged,
+            merged_by_tree: false,
             is_remote: false,
             last_commit_sha: sha,
             last_commit_date: commit_date,
@@ -316,6 +320,7 @@ fn list_remote_branches(default_branch: &str, merged: &HashSet<String>) -> Resul
             name,
             age_days,
             is_merged,
+            merged_by_tree: false,
             is_remote: true,
             last_commit_sha: sha,
             last_commit_date: commit_date,
