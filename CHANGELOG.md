@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/armgabrielyan/deadbranch/compare/v0.3.0...v0.4.0) (2026-03-30)
+
+
+### Features
+
+* detect squash-merged and rebase-merged branches via merge-tree ([#25](https://github.com/armgabrielyan/deadbranch/issues/25)) ([61af694](https://github.com/armgabrielyan/deadbranch/commit/61af6946007230564460d3551fd8dc5a49b27b61))
+* expand the list of default protected branches ([#21](https://github.com/armgabrielyan/deadbranch/issues/21)) ([7749df2](https://github.com/armgabrielyan/deadbranch/commit/7749df200be0a406cfe0be542c53c185f2d126d9))
+
 ## [0.3.0](https://github.com/armgabrielyan/deadbranch/compare/v0.2.1...v0.3.0) (2026-03-14)
 
 

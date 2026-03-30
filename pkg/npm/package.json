@@ -1,6 +1,6 @@
 {
   "name": "deadbranch",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Clean up stale git branches safely",
   "repository": {
     "type": "git",
